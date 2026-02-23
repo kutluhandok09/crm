@@ -229,7 +229,8 @@ sudo ufw --force enable
 
 log "Deploying application code..."
 sudo mkdir -p "${APP_PATH}"
-sudo rsync -a --delete "${SOURCE_APP_DIR}/" "${APP_PATH}/"
+# Avoid destructive sync to keep existing .env/storage data on reruns.
+sudo rsync -a "${SOURCE_APP_DIR}/" "${APP_PATH}/"
 sudo chown -R "${APP_USER}:www-data" "${APP_PATH}"
 
 cd "${APP_PATH}"
