@@ -13,7 +13,7 @@ foreach (config('tenancy.central_domains', []) as $centralDomain) {
         ->group(function () {
             Route::get('/', function () {
                 return auth()->check()
-                    ? redirect()->route('dashboard')
+                    ? redirect('/dashboard')
                     : redirect()->route('login');
             })->name('home');
 

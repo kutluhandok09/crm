@@ -30,7 +30,13 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions) {
         $exceptions->render(function (TenantCouldNotBeIdentifiedOnDomainException $e, Request $request) {
-            $target = rtrim((string) config('app.url'), '/').'/login';
+            $preferredCentralDomain = collect(config('tenancy.central_domains', []))
+                ->map(fn (string $domain): string => strtolower(trim($domain)))
+                ->first(fn (string $domain): bool => ! in_array($domain, ['127.0.0.1', 'localhost'], true));
+
+            $fallbackHost = $preferredCentralDomain ?: $request->getHost();
+            $scheme = $request->isSecure() ? 'https' : 'http';
+            $target = "{$scheme}://{$fallbackHost}/login";
 
             return redirect()->to($target);
         });

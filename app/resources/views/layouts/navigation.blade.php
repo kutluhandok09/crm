@@ -3,7 +3,7 @@
         <div class="flex justify-between h-16">
             <div class="flex">
                 <div class="shrink-0 flex items-center">
-                    <a href="{{ request()->routeIs('tenant.*') ? route('tenant.dashboard') : route('dashboard') }}">
+                    <a href="{{ request()->routeIs('tenant.*') ? route('tenant.dashboard') : url('/dashboard') }}">
                         <x-application-logo class="block h-9 w-auto fill-current text-gray-800" />
                     </a>
                 </div>
@@ -20,7 +20,7 @@
                             Faturalar
                         </x-nav-link>
                     @else
-                        <x-nav-link :href="route('dashboard')" :active="request()->routeIs('dashboard')">
+                        <x-nav-link :href="url('/dashboard')" :active="request()->routeIs('dashboard')">
                             Merkezi Dashboard
                         </x-nav-link>
                         <x-nav-link :href="route('central.tenants.index')" :active="request()->routeIs('central.tenants.*')">
@@ -87,7 +87,7 @@
                     Faturalar
                 </x-responsive-nav-link>
             @else
-                <x-responsive-nav-link :href="route('dashboard')" :active="request()->routeIs('dashboard')">
+                <x-responsive-nav-link :href="url('/dashboard')" :active="request()->routeIs('dashboard')">
                     Merkezi Dashboard
                 </x-responsive-nav-link>
                 <x-responsive-nav-link :href="route('central.tenants.index')" :active="request()->routeIs('central.tenants.*')">
