@@ -182,7 +182,7 @@ CENTRAL_SUBDOMAIN="$(ask "Central panel subdomain" "admin")"
 CENTRAL_SUBDOMAIN="$(printf '%s' "${CENTRAL_SUBDOMAIN}" | tr '[:upper:]' '[:lower:]')"
 ensure_matches "${CENTRAL_SUBDOMAIN}" '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$' "central subdomain"
 CENTRAL_DOMAIN="${CENTRAL_SUBDOMAIN}.${DOMAIN}"
-CENTRAL_DOMAINS="$(ask "Central domains CSV (production: only central domain)" "${CENTRAL_DOMAIN}")"
+CENTRAL_DOMAINS="$(ask "Central domains CSV" "${CENTRAL_DOMAIN},${DOMAIN}")"
 
 APP_PATH="$(ask "Deploy path for Laravel app" "/var/www/kktc-erp-saas")"
 APP_USER="$(ask "System user owning project files" "${USER}")"
