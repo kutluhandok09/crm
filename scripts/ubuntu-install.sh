@@ -84,10 +84,6 @@ ensure_matches() {
     fi
 }
 
-escape_sed() {
-    printf '%s' "$1" | sed -e 's/[\/&|]/\\&/g'
-}
-
 sql_escape() {
     printf '%s' "$1" | sed "s/'/''/g"
 }
@@ -96,14 +92,27 @@ upsert_env() {
     local file="$1"
     local key="$2"
     local value="$3"
-    local escaped
-    escaped="$(escape_sed "${value}")"
+    local tmp_file
 
-    if grep -q "^${key}=" "${file}"; then
-        sed -i "s|^${key}=.*|${key}=${escaped}|g" "${file}"
-    else
-        echo "${key}=${value}" >> "${file}"
-    fi
+    touch "${file}"
+    tmp_file="$(mktemp)"
+
+    awk -v env_key="${key}" -v env_value="${value}" '
+        BEGIN { updated = 0 }
+        $0 ~ ("^" env_key "=") {
+            print env_key "=" env_value
+            updated = 1
+            next
+        }
+        { print }
+        END {
+            if (updated == 0) {
+                print env_key "=" env_value
+            }
+        }
+    ' "${file}" > "${tmp_file}"
+
+    mv "${tmp_file}" "${file}"
 }
 
 run_as_app_user() {
@@ -122,6 +131,7 @@ fi
 require_command sudo
 require_command bash
 require_command grep
+require_command awk
 
 if [[ ! -f "${DEFAULT_SOURCE_APP_DIR}/artisan" ]]; then
     warn "Default source app directory not found at ${DEFAULT_SOURCE_APP_DIR}."
