@@ -98,12 +98,7 @@ php artisan serve
 
 ## Ilk Giris
 
-Default seed ile:
-
-- Email: `admin@domain.com`
-- Sifre: `Admin12345!`
-
-> Canli ortamda ilk giristen sonra sifreyi degistirmen zorunlu tavsiye edilir.
+Seed acildiysa script kurulum sirasinda senden **ilk super-admin email ve sifresini** ister ve o degerleri uygular.
 
 ---
 

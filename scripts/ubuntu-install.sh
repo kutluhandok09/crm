@@ -173,8 +173,14 @@ TENANT_DB_PREFIX="$(ask "Tenant database prefix" "tenant_")"
 ensure_matches "${TENANT_DB_PREFIX}" '^[A-Za-z0-9_]+$' "tenant database prefix"
 
 RUN_SEED="no"
+ADMIN_EMAIL=""
+ADMIN_PASSWORD=""
 if confirm "Run central db seed (creates super-admin user)?"; then
     RUN_SEED="yes"
+    ADMIN_EMAIL="$(ask "Initial super-admin email" "admin@${DOMAIN}")"
+    ensure_matches "${ADMIN_EMAIL}" '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' "initial super-admin email"
+    ADMIN_PASSWORD="$(ask_secret "Initial super-admin password (used after seeding)")"
+    ensure_not_empty "${ADMIN_PASSWORD}" "Initial super-admin password"
 fi
 
 SSL_MODE="$(ask "SSL mode (wildcard-cloudflare / central-only)" "wildcard-cloudflare")"
@@ -204,6 +210,10 @@ echo "  DB host/port:            ${DB_HOST}:${DB_PORT}"
 echo "  Central DB:              ${DB_CENTRAL_DATABASE}"
 echo "  DB app user:             ${DB_APP_USER}"
 echo "  Tenant DB prefix:        ${TENANT_DB_PREFIX}"
+echo "  Run seed:                ${RUN_SEED}"
+if [[ "${RUN_SEED}" == "yes" ]]; then
+echo "  Seed admin email:        ${ADMIN_EMAIL}"
+fi
 echo "  SSL mode:                ${SSL_MODE}"
 
 confirm "Proceed with installation?" || exit 1
@@ -326,6 +336,38 @@ run_as_app_user php artisan migrate --database=central --force
 
 if [[ "${RUN_SEED}" == "yes" ]]; then
     run_as_app_user php artisan db:seed --database=central --force
+
+    log "Updating seeded super-admin credentials..."
+    APP_ADMIN_EMAIL="${ADMIN_EMAIL}" APP_ADMIN_PASSWORD="${ADMIN_PASSWORD}" run_as_app_user php <<'PHP'
+<?php
+require __DIR__.'/vendor/autoload.php';
+
+$app = require __DIR__.'/bootstrap/app.php';
+$kernel = $app->make(Illuminate\Contracts\Console\Kernel::class);
+$kernel->bootstrap();
+
+$adminEmail = getenv('APP_ADMIN_EMAIL') ?: 'admin@domain.com';
+$adminPassword = getenv('APP_ADMIN_PASSWORD') ?: null;
+
+if (!$adminPassword) {
+    fwrite(STDERR, "Seeded admin password is empty.\n");
+    exit(1);
+}
+
+$user = \App\Models\User::query()->where('email', 'admin@domain.com')->first();
+if (!$user) {
+    $user = \App\Models\User::query()->orderBy('id')->first();
+}
+
+if (!$user) {
+    fwrite(STDERR, "No user found after seeding.\n");
+    exit(1);
+}
+
+$user->email = strtolower($adminEmail);
+$user->password = \Illuminate\Support\Facades\Hash::make($adminPassword);
+$user->save();
+PHP
 fi
 
 run_as_app_user php artisan storage:link || true
@@ -523,8 +565,12 @@ echo "Tenant URL  : $(if [[ "${SSL_ENABLED}" == "yes" ]]; then echo "https"; els
 echo "App path    : ${APP_PATH}"
 echo
 echo "If seed was enabled, default admin user:"
-echo "  Email: admin@domain.com"
-echo "  Password: Admin12345!"
+if [[ "${RUN_SEED}" == "yes" ]]; then
+echo "  Email: ${ADMIN_EMAIL}"
+echo "  Password: (custom value entered during setup)"
+else
+echo "  Seed not run."
+fi
 echo
 echo "Next manual checks:"
 echo "  - php artisan tenants:list"
