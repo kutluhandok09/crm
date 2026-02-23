@@ -119,6 +119,16 @@ cd app
 php artisan tenants:migrate --force
 ```
 
+### Super-admin olusturma/guncelleme scripti
+
+```bash
+bash scripts/create-superadmin.sh \
+  --app-path /var/www/kktc-erp-saas \
+  --email admin@kibrisguvenlik.net \
+  --username superadmin \
+  --password 'YeniSifre123Aa'
+```
+
 ### Testler
 
 ```bash
