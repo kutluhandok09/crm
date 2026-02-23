@@ -94,26 +94,25 @@ upsert_env() {
     local value="$3"
     local tmp_file
     local formatted_value
+    local updated
 
     formatted_value="$(format_env_value "${value}")"
-
-    touch "${file}"
+    updated=0
     tmp_file="$(mktemp)"
+    touch "${file}"
 
-    awk -v env_key="${key}" -v env_value="${formatted_value}" '
-        BEGIN { updated = 0 }
-        $0 ~ ("^" env_key "=") {
-            print env_key "=" env_value
-            updated = 1
-            next
-        }
-        { print }
-        END {
-            if (updated == 0) {
-                print env_key "=" env_value
-            }
-        }
-    ' "${file}" > "${tmp_file}"
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        if [[ "${line}" == "${key}="* ]]; then
+            printf '%s=%s\n' "${key}" "${formatted_value}" >> "${tmp_file}"
+            updated=1
+        else
+            printf '%s\n' "${line}" >> "${tmp_file}"
+        fi
+    done < "${file}"
+
+    if [[ "${updated}" -eq 0 ]]; then
+        printf '%s=%s\n' "${key}" "${formatted_value}" >> "${tmp_file}"
+    fi
 
     mv "${tmp_file}" "${file}"
 }
@@ -157,7 +156,6 @@ fi
 require_command sudo
 require_command bash
 require_command grep
-require_command awk
 
 if [[ ! -f "${DEFAULT_SOURCE_APP_DIR}/artisan" ]]; then
     warn "Default source app directory not found at ${DEFAULT_SOURCE_APP_DIR}."
@@ -319,9 +317,10 @@ run_as_app_user composer install --no-interaction --prefer-dist --optimize-autol
 run_as_app_user npm install --no-audit --no-fund
 run_as_app_user npm run build
 
-if [[ ! -f "${APP_PATH}/.env" ]]; then
-    cp "${APP_PATH}/.env.example" "${APP_PATH}/.env"
+if [[ -f "${APP_PATH}/.env" ]]; then
+    cp "${APP_PATH}/.env" "${APP_PATH}/.env.backup.$(date +%Y%m%d%H%M%S)"
 fi
+cp "${APP_PATH}/.env.example" "${APP_PATH}/.env"
 
 ENV_FILE="${APP_PATH}/.env"
 upsert_env "${ENV_FILE}" "APP_NAME" "KKTC ERP SaaS"
