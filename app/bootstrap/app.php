@@ -17,6 +17,7 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->append([
+            \App\Http\Middleware\ForceRequestRootUrl::class,
             \App\Http\Middleware\SecurityHeaders::class,
         ]);
 
