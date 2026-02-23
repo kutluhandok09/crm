@@ -21,6 +21,9 @@ return Application::configure(basePath: dirname(__DIR__))
             \App\Http\Middleware\SecurityHeaders::class,
         ]);
 
+        // Keep auth redirects host-agnostic to avoid localhost leaks from APP_URL.
+        $middleware->redirectGuestsTo(static fn (Request $request): string => '/login');
+
         $middleware->alias([
             'central.domain' => \App\Http\Middleware\EnsureCentralDomain::class,
             'tenant.access' => \App\Http\Middleware\EnsureTenantAccess::class,
