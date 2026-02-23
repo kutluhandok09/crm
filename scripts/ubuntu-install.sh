@@ -93,11 +93,14 @@ upsert_env() {
     local key="$2"
     local value="$3"
     local tmp_file
+    local formatted_value
+
+    formatted_value="$(format_env_value "${value}")"
 
     touch "${file}"
     tmp_file="$(mktemp)"
 
-    awk -v env_key="${key}" -v env_value="${value}" '
+    awk -v env_key="${key}" -v env_value="${formatted_value}" '
         BEGIN { updated = 0 }
         $0 ~ ("^" env_key "=") {
             print env_key "=" env_value
@@ -113,6 +116,29 @@ upsert_env() {
     ' "${file}" > "${tmp_file}"
 
     mv "${tmp_file}" "${file}"
+}
+
+format_env_value() {
+    local value="$1"
+    local escaped
+
+    if [[ -z "${value}" ]]; then
+        printf '""'
+        return
+    fi
+
+    if [[ "${value}" =~ ^[A-Za-z0-9._/:,@+-]+$ ]]; then
+        printf '%s' "${value}"
+        return
+    fi
+
+    escaped="${value//\\/\\\\}"
+    escaped="${escaped//\"/\\\"}"
+    escaped="${escaped//\$/\\$}"
+    escaped="${escaped//$'\n'/\\n}"
+    escaped="${escaped//$'\r'/}"
+
+    printf '"%s"' "${escaped}"
 }
 
 run_as_app_user() {
@@ -298,7 +324,7 @@ if [[ ! -f "${APP_PATH}/.env" ]]; then
 fi
 
 ENV_FILE="${APP_PATH}/.env"
-upsert_env "${ENV_FILE}" "APP_NAME" "\"KKTC ERP SaaS\""
+upsert_env "${ENV_FILE}" "APP_NAME" "KKTC ERP SaaS"
 upsert_env "${ENV_FILE}" "APP_ENV" "production"
 upsert_env "${ENV_FILE}" "APP_DEBUG" "false"
 upsert_env "${ENV_FILE}" "APP_URL" "https://${CENTRAL_DOMAIN}"
@@ -350,17 +376,34 @@ GRANT CREATE, ALTER, DROP, INDEX, REFERENCES ON *.* TO '${DB_APP_USER}'@'127.0.0
 FLUSH PRIVILEGES;
 SQL
 
+run_artisan_with_db_env() {
+    run_as_app_user env \
+        DB_CONNECTION=central \
+        DB_CENTRAL_CONNECTION=central \
+        DB_CENTRAL_DRIVER=mariadb \
+        DB_CENTRAL_HOST="${DB_HOST}" \
+        DB_CENTRAL_PORT="${DB_PORT}" \
+        DB_CENTRAL_DATABASE="${DB_CENTRAL_DATABASE}" \
+        DB_CENTRAL_USERNAME="${DB_APP_USER}" \
+        DB_CENTRAL_PASSWORD="${DB_APP_PASSWORD}" \
+        DB_HOST="${DB_HOST}" \
+        DB_PORT="${DB_PORT}" \
+        DB_DATABASE="${DB_CENTRAL_DATABASE}" \
+        DB_USERNAME="${DB_APP_USER}" \
+        DB_PASSWORD="${DB_APP_PASSWORD}" \
+        "$@"
+}
+
 log "Running Laravel setup commands..."
 run_as_app_user php artisan key:generate --force
 run_as_app_user php artisan config:clear
-run_as_app_user php artisan cache:clear || true
-run_as_app_user php artisan migrate --database=central --force
+run_artisan_with_db_env php artisan migrate --database=central --force
 
 if [[ "${RUN_SEED}" == "yes" ]]; then
-    run_as_app_user php artisan db:seed --database=central --force
+    run_artisan_with_db_env php artisan db:seed --database=central --force
 
     log "Updating seeded super-admin credentials..."
-    APP_ADMIN_EMAIL="${ADMIN_EMAIL}" APP_ADMIN_PASSWORD="${ADMIN_PASSWORD}" run_as_app_user php <<'PHP'
+    APP_ADMIN_EMAIL="${ADMIN_EMAIL}" APP_ADMIN_PASSWORD="${ADMIN_PASSWORD}" run_artisan_with_db_env php <<'PHP'
 <?php
 require __DIR__.'/vendor/autoload.php';
 
