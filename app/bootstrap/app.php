@@ -14,6 +14,10 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
+        $middleware->append([
+            \App\Http\Middleware\SecurityHeaders::class,
+        ]);
+
         $middleware->alias([
             'central.domain' => \App\Http\Middleware\EnsureCentralDomain::class,
             'tenant.access' => \App\Http\Middleware\EnsureTenantAccess::class,

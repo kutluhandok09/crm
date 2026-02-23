@@ -31,8 +31,8 @@ class TwoFactorChallengeController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $request->validate([
-            'code' => ['nullable', 'string'],
-            'recovery_code' => ['nullable', 'string'],
+            'code' => ['nullable', 'digits:6'],
+            'recovery_code' => ['nullable', 'string', 'max:32'],
         ]);
 
         $userId = $request->session()->get('two_factor_login.user_id');

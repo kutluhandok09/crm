@@ -63,6 +63,17 @@ ensure_not_empty() {
     fi
 }
 
+ensure_matches() {
+    local value="$1"
+    local regex="$2"
+    local field="$3"
+
+    if [[ ! "${value}" =~ ${regex} ]]; then
+        error "Invalid ${field}: ${value}"
+        exit 1
+    fi
+}
+
 escape_sed() {
     printf '%s' "$1" | sed -e 's/[\/&|]/\\&/g'
 }
@@ -100,6 +111,7 @@ fi
 
 require_command sudo
 require_command bash
+require_command grep
 
 if [[ ! -f "${DEFAULT_SOURCE_APP_DIR}/artisan" ]]; then
     warn "Default source app directory not found at ${DEFAULT_SOURCE_APP_DIR}."
@@ -119,8 +131,10 @@ log "KKTC ERP SaaS Ubuntu setup is starting."
 
 DOMAIN="$(ask "Primary domain (example: domain.com)")"
 ensure_not_empty "${DOMAIN}" "Primary domain"
+ensure_matches "${DOMAIN}" '^([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$' "primary domain"
 
 CENTRAL_SUBDOMAIN="$(ask "Central panel subdomain" "admin")"
+ensure_matches "${CENTRAL_SUBDOMAIN}" '^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$' "central subdomain"
 CENTRAL_DOMAIN="${CENTRAL_SUBDOMAIN}.${DOMAIN}"
 CENTRAL_DOMAINS="$(ask "Central domains CSV" "127.0.0.1,localhost,${CENTRAL_DOMAIN}")"
 
@@ -138,18 +152,25 @@ if [[ ! -f "${SOURCE_APP_DIR}/artisan" ]]; then
     error "Invalid source app directory: ${SOURCE_APP_DIR} (artisan file missing)."
     exit 1
 fi
+ensure_matches "${APP_PATH}" '^/' "deploy path"
 
 TIMEZONE="$(ask "Server timezone" "Europe/Istanbul")"
 PHP_VERSION="$(ask "PHP version (8.2/8.3)" "8.3")"
+ensure_matches "${PHP_VERSION}" '^[0-9]+\.[0-9]+$' "PHP version"
 NODE_MAJOR="$(ask "Node.js major version" "20")"
+ensure_matches "${NODE_MAJOR}" '^[0-9]+$' "Node.js major version"
 
 DB_CENTRAL_DATABASE="$(ask "Central database name" "erp_central")"
+ensure_matches "${DB_CENTRAL_DATABASE}" '^[A-Za-z0-9_]+$' "central database name"
 DB_APP_USER="$(ask "Database app user" "erp_app")"
+ensure_matches "${DB_APP_USER}" '^[A-Za-z0-9_]+$' "database app user"
 DB_APP_PASSWORD="$(ask_secret "Database app password")"
 ensure_not_empty "${DB_APP_PASSWORD}" "Database app password"
 DB_HOST="$(ask "Database host" "127.0.0.1")"
 DB_PORT="$(ask "Database port" "3306")"
+ensure_matches "${DB_PORT}" '^[0-9]+$' "database port"
 TENANT_DB_PREFIX="$(ask "Tenant database prefix" "tenant_")"
+ensure_matches "${TENANT_DB_PREFIX}" '^[A-Za-z0-9_]+$' "tenant database prefix"
 
 RUN_SEED="no"
 if confirm "Run central db seed (creates super-admin user)?"; then
@@ -283,18 +304,17 @@ upsert_env "${ENV_FILE}" "CACHE_STORE" "database"
 upsert_env "${ENV_FILE}" "QUEUE_CONNECTION" "database"
 
 log "Preparing MariaDB central database and user grants..."
-DB_APP_USER_SQL="$(sql_escape "${DB_APP_USER}")"
 DB_APP_PASSWORD_SQL="$(sql_escape "${DB_APP_PASSWORD}")"
-DB_CENTRAL_DATABASE_SQL="$(sql_escape "${DB_CENTRAL_DATABASE}")"
+DB_CENTRAL_DATABASE_SQL="${DB_CENTRAL_DATABASE}"
 
 sudo mariadb <<SQL
 CREATE DATABASE IF NOT EXISTS \`${DB_CENTRAL_DATABASE_SQL}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS '${DB_APP_USER_SQL}'@'localhost' IDENTIFIED BY '${DB_APP_PASSWORD_SQL}';
-CREATE USER IF NOT EXISTS '${DB_APP_USER_SQL}'@'127.0.0.1' IDENTIFIED BY '${DB_APP_PASSWORD_SQL}';
-GRANT ALL PRIVILEGES ON \`${DB_CENTRAL_DATABASE_SQL}\`.* TO '${DB_APP_USER_SQL}'@'localhost';
-GRANT ALL PRIVILEGES ON \`${DB_CENTRAL_DATABASE_SQL}\`.* TO '${DB_APP_USER_SQL}'@'127.0.0.1';
-GRANT CREATE, ALTER, DROP, INDEX, REFERENCES ON *.* TO '${DB_APP_USER_SQL}'@'localhost';
-GRANT CREATE, ALTER, DROP, INDEX, REFERENCES ON *.* TO '${DB_APP_USER_SQL}'@'127.0.0.1';
+CREATE USER IF NOT EXISTS '${DB_APP_USER}'@'localhost' IDENTIFIED BY '${DB_APP_PASSWORD_SQL}';
+CREATE USER IF NOT EXISTS '${DB_APP_USER}'@'127.0.0.1' IDENTIFIED BY '${DB_APP_PASSWORD_SQL}';
+GRANT ALL PRIVILEGES ON \`${DB_CENTRAL_DATABASE_SQL}\`.* TO '${DB_APP_USER}'@'localhost';
+GRANT ALL PRIVILEGES ON \`${DB_CENTRAL_DATABASE_SQL}\`.* TO '${DB_APP_USER}'@'127.0.0.1';
+GRANT CREATE, ALTER, DROP, INDEX, REFERENCES ON *.* TO '${DB_APP_USER}'@'localhost';
+GRANT CREATE, ALTER, DROP, INDEX, REFERENCES ON *.* TO '${DB_APP_USER}'@'127.0.0.1';
 FLUSH PRIVILEGES;
 SQL
 

@@ -73,7 +73,7 @@ class ProfileController extends Controller
     public function confirmTwoFactor(Request $request): RedirectResponse
     {
         $request->validate([
-            'code' => ['required', 'string'],
+            'code' => ['required', 'digits:6'],
         ]);
 
         $user = $request->user();

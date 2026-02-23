@@ -42,14 +42,26 @@ class TenantController extends Controller
     {
         $this->authorize('create', Tenant::class);
 
+        $request->merge([
+            'tenant_id' => trim(Str::lower((string) $request->input('tenant_id'))),
+            'domain' => trim(Str::lower((string) $request->input('domain'))),
+        ]);
+
         $centralDomains = collect(config('tenancy.central_domains'))
             ->map(fn (string $domain): string => strtolower($domain))
             ->all();
 
         $validated = $request->validate([
-            'tenant_id' => ['nullable', 'string', 'max:64', 'regex:/^[a-z0-9-]+$/', 'unique:tenants,id'],
+            'tenant_id' => ['nullable', 'string', 'max:64', 'regex:/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/', 'unique:tenants,id'],
             'company_name' => ['required', 'string', 'max:255'],
-            'domain' => ['required', 'string', 'max:255', 'unique:domains,domain', Rule::notIn($centralDomains)],
+            'domain' => [
+                'required',
+                'string',
+                'max:255',
+                'regex:/^(?=.{1,253}$)(?!-)(?:[a-z0-9-]{1,63}\.)+[a-z]{2,63}$/',
+                'unique:domains,domain',
+                Rule::notIn($centralDomains),
+            ],
             'default_currency' => ['required', Rule::in(['TRY', 'GBP', 'EUR', 'USD'])],
             'reseller_id' => ['nullable', 'integer', 'exists:users,id'],
         ]);
