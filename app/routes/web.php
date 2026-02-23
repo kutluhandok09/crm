@@ -16,9 +16,15 @@ use Illuminate\Support\Facades\Route;
  */
 $centralDomains = array_values(config('tenancy.central_domains', []));
 $appUrlHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+$normalizedAppUrlHost = is_string($appUrlHost) ? strtolower(trim($appUrlHost)) : null;
 
 $primaryCentralDomain = null;
-if (is_string($appUrlHost) && in_array($appUrlHost, $centralDomains, true)) {
+if (
+    is_string($appUrlHost)
+    && in_array($appUrlHost, $centralDomains, true)
+    && ! in_array($normalizedAppUrlHost, ['localhost', '127.0.0.1', '::1'], true)
+    && filter_var($appUrlHost, FILTER_VALIDATE_IP) === false
+) {
     $primaryCentralDomain = $appUrlHost;
 } else {
     $nonLocalCentralDomains = array_values(array_filter(
