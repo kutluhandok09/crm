@@ -184,7 +184,7 @@ CENTRAL_SUBDOMAIN="$(ask "Central panel subdomain" "admin")"
 CENTRAL_SUBDOMAIN="$(printf '%s' "${CENTRAL_SUBDOMAIN}" | tr '[:upper:]' '[:lower:]')"
 ensure_matches "${CENTRAL_SUBDOMAIN}" '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$' "central subdomain"
 CENTRAL_DOMAIN="${CENTRAL_SUBDOMAIN}.${DOMAIN}"
-CENTRAL_DOMAINS="$(ask "Central domains CSV" "127.0.0.1,localhost,${CENTRAL_DOMAIN}")"
+CENTRAL_DOMAINS="$(ask "Central domains CSV (production: only central domain)" "${CENTRAL_DOMAIN}")"
 
 APP_PATH="$(ask "Deploy path for Laravel app" "/var/www/kktc-erp-saas")"
 APP_USER="$(ask "System user owning project files" "${USER}")"
@@ -436,7 +436,11 @@ PHP
 fi
 
 run_as_app_user php artisan storage:link || true
-run_as_app_user php artisan optimize
+# Avoid route:cache because central domains may define repeated named routes.
+run_as_app_user php artisan route:clear || true
+run_as_app_user php artisan config:cache
+run_as_app_user php artisan event:cache || true
+run_as_app_user php artisan view:cache || true
 
 sudo chown -R www-data:www-data "${APP_PATH}/storage" "${APP_PATH}/bootstrap/cache"
 sudo chmod -R 775 "${APP_PATH}/storage" "${APP_PATH}/bootstrap/cache"

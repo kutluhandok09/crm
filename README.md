@@ -55,6 +55,7 @@ Script senden su bilgileri ister:
 
 - ana domain (`domain.com`) - URL de girsen normalize edilir (`https://domain.com/` -> `domain.com`)
 - central subdomain (`admin`)
+- central domains CSV (production icin sadece `admin.domain.com` onerilir)
 - app kurulum yolu (`/var/www/kktc-erp-saas`)
 - PHP surumu (onerilen `8.3`)
 - Node LTS surumu (onerilen `20`)
