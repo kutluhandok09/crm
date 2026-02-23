@@ -316,6 +316,8 @@ if [[ -f "${APP_PATH}/.env" ]]; then
     cp "${APP_PATH}/.env" "${APP_PATH}/.env.backup.$(date +%Y%m%d%H%M%S)"
 fi
 cp "${APP_PATH}/.env.example" "${APP_PATH}/.env"
+sudo chown "${APP_USER}:www-data" "${APP_PATH}/.env"
+sudo chmod 640 "${APP_PATH}/.env"
 
 ENV_FILE="${APP_PATH}/.env"
 upsert_env "${ENV_FILE}" "APP_NAME" "KKTC ERP SaaS"
@@ -354,6 +356,12 @@ upsert_env "${ENV_FILE}" "DB_TENANT_STRICT_MODE" "true"
 upsert_env "${ENV_FILE}" "SESSION_DRIVER" "database"
 upsert_env "${ENV_FILE}" "CACHE_STORE" "database"
 upsert_env "${ENV_FILE}" "QUEUE_CONNECTION" "database"
+
+APP_KEY_CURRENT="$(grep '^APP_KEY=' "${ENV_FILE}" | head -n1 | cut -d= -f2- || true)"
+if [[ -z "${APP_KEY_CURRENT}" || "${APP_KEY_CURRENT}" == "\"\"" ]]; then
+    APP_KEY_VALUE="$(php -r "echo 'base64:'.base64_encode(random_bytes(32));")"
+    upsert_env "${ENV_FILE}" "APP_KEY" "${APP_KEY_VALUE}"
+fi
 
 log "Installing PHP/Node dependencies..."
 run_as_app_user composer install --no-interaction --prefer-dist --optimize-autoloader --no-scripts
