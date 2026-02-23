@@ -53,7 +53,7 @@ bash scripts/ubuntu-install.sh
 
 Script senden su bilgileri ister:
 
-- ana domain (`domain.com`)
+- ana domain (`domain.com`) - URL de girsen normalize edilir (`https://domain.com/` -> `domain.com`)
 - central subdomain (`admin`)
 - app kurulum yolu (`/var/www/kktc-erp-saas`)
 - PHP surumu (onerilen `8.3`)

@@ -47,6 +47,16 @@ ask_secret() {
     echo "${result}"
 }
 
+normalize_domain_input() {
+    local value="$1"
+    value="$(printf '%s' "${value}" | tr '[:upper:]' '[:lower:]')"
+    value="${value#http://}"
+    value="${value#https://}"
+    value="${value%%/*}"
+    value="${value%.}"
+    printf '%s' "${value}"
+}
+
 confirm() {
     local prompt="$1"
     local answer=""
@@ -131,10 +141,12 @@ log "KKTC ERP SaaS Ubuntu setup is starting."
 
 DOMAIN="$(ask "Primary domain (example: domain.com)")"
 ensure_not_empty "${DOMAIN}" "Primary domain"
-ensure_matches "${DOMAIN}" '^([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$' "primary domain"
+DOMAIN="$(normalize_domain_input "${DOMAIN}")"
+ensure_matches "${DOMAIN}" '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$' "primary domain"
 
 CENTRAL_SUBDOMAIN="$(ask "Central panel subdomain" "admin")"
-ensure_matches "${CENTRAL_SUBDOMAIN}" '^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$' "central subdomain"
+CENTRAL_SUBDOMAIN="$(printf '%s' "${CENTRAL_SUBDOMAIN}" | tr '[:upper:]' '[:lower:]')"
+ensure_matches "${CENTRAL_SUBDOMAIN}" '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$' "central subdomain"
 CENTRAL_DOMAIN="${CENTRAL_SUBDOMAIN}.${DOMAIN}"
 CENTRAL_DOMAINS="$(ask "Central domains CSV" "127.0.0.1,localhost,${CENTRAL_DOMAIN}")"
 
