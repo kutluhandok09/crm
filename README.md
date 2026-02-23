@@ -60,7 +60,10 @@ Script senden su bilgileri ister:
 - Node LTS surumu (onerilen `20`)
 - MariaDB veritabani bilgileri
 - tenant veritabani prefix
-- wildcard SSL icin Cloudflare API token (opsiyonel ama onerilir)
+- SSL modu:
+  - `wildcard-cloudflare` (onerilen, tenant wildcard SSL icin)
+  - `central-only` (sadece merkezi domain SSL)
+- wildcard mod secilirse Cloudflare API token (zorunlu)
 
 ### 2) Script ne yapar?
 
@@ -71,7 +74,9 @@ Script senden su bilgileri ister:
 - Central DB olusturur ve yetki verir
 - Migration + (opsiyonel) seed calistirir
 - Nginx merkezi + wildcard domain konfigurasyonunu yazar
-- SSL (Cloudflare DNS challenge ile) wildcard sertifika alir
+- SSL sertifikasi olusturur:
+  - wildcard modda `domain.com` + `*.domain.com`
+  - central-only modda sadece `admin.domain.com`
 - Cron scheduler ve Supervisor queue worker kurar
 
 ---

@@ -78,10 +78,18 @@ upsert_env() {
     local escaped
     escaped="$(escape_sed "${value}")"
 
-    if rg -q "^${key}=" "${file}"; then
+    if grep -q "^${key}=" "${file}"; then
         sed -i "s|^${key}=.*|${key}=${escaped}|g" "${file}"
     else
         echo "${key}=${value}" >> "${file}"
+    fi
+}
+
+run_as_app_user() {
+    if [[ "$(id -un)" == "${APP_USER}" ]]; then
+        "$@"
+    else
+        sudo -u "${APP_USER}" "$@"
     fi
 }
 
@@ -91,7 +99,6 @@ if [[ "${EUID}" -eq 0 ]]; then
 fi
 
 require_command sudo
-require_command rg
 require_command bash
 
 if [[ ! -f "${DEFAULT_SOURCE_APP_DIR}/artisan" ]]; then
@@ -122,6 +129,11 @@ APP_USER="$(ask "System user owning project files" "${USER}")"
 SOURCE_APP_DIR="$(ask "Source Laravel app directory" "${DEFAULT_SOURCE_APP_DIR}")"
 ensure_not_empty "${SOURCE_APP_DIR}" "Source Laravel app directory"
 
+if ! id "${APP_USER}" >/dev/null 2>&1; then
+    error "System user does not exist: ${APP_USER}"
+    exit 1
+fi
+
 if [[ ! -f "${SOURCE_APP_DIR}/artisan" ]]; then
     error "Invalid source app directory: ${SOURCE_APP_DIR} (artisan file missing)."
     exit 1
@@ -144,13 +156,18 @@ if confirm "Run central db seed (creates super-admin user)?"; then
     RUN_SEED="yes"
 fi
 
-INSTALL_SSL="no"
+SSL_MODE="$(ask "SSL mode (wildcard-cloudflare / central-only)" "wildcard-cloudflare")"
+SSL_MODE="${SSL_MODE,,}"
+SSL_EMAIL="$(ask "SSL contact email" "admin@${DOMAIN}")"
+ensure_not_empty "${SSL_EMAIL}" "SSL contact email"
+
 CLOUDFLARE_API_TOKEN=""
-SSL_EMAIL=""
-if confirm "Configure wildcard SSL with Certbot?"; then
-    INSTALL_SSL="yes"
-    SSL_EMAIL="$(ask "SSL contact email" "admin@${DOMAIN}")"
-    CLOUDFLARE_API_TOKEN="$(ask_secret "Cloudflare API token for DNS challenge (leave empty to skip wildcard cert creation)")"
+if [[ "${SSL_MODE}" == "wildcard-cloudflare" ]]; then
+    CLOUDFLARE_API_TOKEN="$(ask_secret "Cloudflare API token (required for wildcard SSL)")"
+    ensure_not_empty "${CLOUDFLARE_API_TOKEN}" "Cloudflare API token"
+elif [[ "${SSL_MODE}" != "central-only" ]]; then
+    error "Invalid SSL mode: ${SSL_MODE}. Allowed values: wildcard-cloudflare or central-only."
+    exit 1
 fi
 
 log "Configuration summary"
@@ -166,7 +183,7 @@ echo "  DB host/port:            ${DB_HOST}:${DB_PORT}"
 echo "  Central DB:              ${DB_CENTRAL_DATABASE}"
 echo "  DB app user:             ${DB_APP_USER}"
 echo "  Tenant DB prefix:        ${TENANT_DB_PREFIX}"
-echo "  SSL requested:           ${INSTALL_SSL}"
+echo "  SSL mode:                ${SSL_MODE}"
 
 confirm "Proceed with installation?" || exit 1
 
@@ -174,6 +191,7 @@ log "Installing system dependencies..."
 sudo apt update
 sudo apt install -y software-properties-common ca-certificates curl gnupg lsb-release unzip git rsync ufw
 sudo apt install -y nginx mariadb-server supervisor
+sudo apt install -y certbot python3-certbot-nginx
 
 sudo add-apt-repository ppa:ondrej/php -y
 sudo apt update
@@ -217,9 +235,9 @@ sudo chown -R "${APP_USER}:www-data" "${APP_PATH}"
 cd "${APP_PATH}"
 
 log "Installing PHP/Node dependencies..."
-composer install --no-interaction --prefer-dist --optimize-autoloader
-npm install --no-audit --no-fund
-npm run build
+run_as_app_user composer install --no-interaction --prefer-dist --optimize-autoloader
+run_as_app_user npm install --no-audit --no-fund
+run_as_app_user npm run build
 
 if [[ ! -f "${APP_PATH}/.env" ]]; then
     cp "${APP_PATH}/.env.example" "${APP_PATH}/.env"
@@ -280,17 +298,17 @@ FLUSH PRIVILEGES;
 SQL
 
 log "Running Laravel setup commands..."
-php artisan key:generate --force
-php artisan config:clear
-php artisan cache:clear || true
-php artisan migrate --database=central --force
+run_as_app_user php artisan key:generate --force
+run_as_app_user php artisan config:clear
+run_as_app_user php artisan cache:clear || true
+run_as_app_user php artisan migrate --database=central --force
 
 if [[ "${RUN_SEED}" == "yes" ]]; then
-    php artisan db:seed --database=central --force
+    run_as_app_user php artisan db:seed --database=central --force
 fi
 
-php artisan storage:link || true
-php artisan optimize
+run_as_app_user php artisan storage:link || true
+run_as_app_user php artisan optimize
 
 sudo chown -R www-data:www-data "${APP_PATH}/storage" "${APP_PATH}/bootstrap/cache"
 sudo chmod -R 775 "${APP_PATH}/storage" "${APP_PATH}/bootstrap/cache"
@@ -315,35 +333,65 @@ location ~ /\.(?!well-known).* {
 EOF
 
 SSL_ENABLED="no"
+CERT_PATH_DOMAIN="${CENTRAL_DOMAIN}"
+TENANT_SSL_ENABLED="no"
 
-if [[ "${INSTALL_SSL}" == "yes" ]]; then
-    if [[ -n "${CLOUDFLARE_API_TOKEN}" ]]; then
-        log "Installing Certbot DNS plugin for Cloudflare..."
-        sudo apt install -y certbot python3-certbot-dns-cloudflare
-        sudo tee /etc/letsencrypt/cloudflare.ini >/dev/null <<EOF
+if [[ "${SSL_MODE}" == "wildcard-cloudflare" ]]; then
+    log "Installing Certbot DNS plugin for Cloudflare..."
+    sudo apt install -y python3-certbot-dns-cloudflare
+    sudo tee /etc/letsencrypt/cloudflare.ini >/dev/null <<EOF
 dns_cloudflare_api_token = ${CLOUDFLARE_API_TOKEN}
 EOF
-        sudo chmod 600 /etc/letsencrypt/cloudflare.ini
+    sudo chmod 600 /etc/letsencrypt/cloudflare.ini
 
-        log "Requesting wildcard certificate (*.${DOMAIN})..."
-        sudo certbot certonly \
-            --dns-cloudflare \
-            --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini \
-            -d "${DOMAIN}" \
-            -d "*.${DOMAIN}" \
-            --agree-tos \
-            -m "${SSL_EMAIL}" \
-            --no-eff-email || warn "Certificate request failed. Continuing without SSL."
-    else
-        warn "Cloudflare token not provided; wildcard certificate step skipped."
-    fi
+    log "Issuing wildcard certificate for ${DOMAIN} and *.${DOMAIN}..."
+    sudo certbot certonly \
+        --dns-cloudflare \
+        --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini \
+        -d "${DOMAIN}" \
+        -d "*.${DOMAIN}" \
+        --agree-tos \
+        -m "${SSL_EMAIL}" \
+        --non-interactive \
+        --no-eff-email
 
-    if [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
-        SSL_ENABLED="yes"
-    fi
+    CERT_PATH_DOMAIN="${DOMAIN}"
+    TENANT_SSL_ENABLED="yes"
+else
+    warn "Central-only SSL selected. Tenant wildcard will stay HTTP until wildcard cert is configured."
+    log "Issuing certificate for ${CENTRAL_DOMAIN} via nginx challenge..."
+    # Temporary HTTP config for challenge.
+    sudo tee /etc/nginx/sites-available/kktc-erp.conf >/dev/null <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${CENTRAL_DOMAIN} *.${DOMAIN};
+    include /etc/nginx/snippets/kktc-erp-laravel.conf;
+}
+EOF
+    sudo ln -sf /etc/nginx/sites-available/kktc-erp.conf /etc/nginx/sites-enabled/kktc-erp.conf
+    sudo rm -f /etc/nginx/sites-enabled/default
+    sudo nginx -t
+    sudo systemctl reload nginx
+
+    sudo certbot --nginx \
+        -d "${CENTRAL_DOMAIN}" \
+        --agree-tos \
+        -m "${SSL_EMAIL}" \
+        --non-interactive \
+        --redirect \
+        --no-eff-email
+fi
+
+if [[ -f "/etc/letsencrypt/live/${CERT_PATH_DOMAIN}/fullchain.pem" ]]; then
+    SSL_ENABLED="yes"
+else
+    error "SSL certificate was not created successfully."
+    exit 1
 fi
 
 if [[ "${SSL_ENABLED}" == "yes" ]]; then
+    if [[ "${TENANT_SSL_ENABLED}" == "yes" ]]; then
     sudo tee /etc/nginx/sites-available/kktc-erp.conf >/dev/null <<EOF
 server {
     listen 80;
@@ -374,6 +422,35 @@ server {
     include /etc/nginx/snippets/kktc-erp-laravel.conf;
 }
 EOF
+    else
+        sudo tee /etc/nginx/sites-available/kktc-erp.conf >/dev/null <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${CENTRAL_DOMAIN};
+    return 301 https://\$host\$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${CENTRAL_DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/${CERT_PATH_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${CERT_PATH_DOMAIN}/privkey.pem;
+
+    include /etc/nginx/snippets/kktc-erp-laravel.conf;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name *.${DOMAIN};
+
+    include /etc/nginx/snippets/kktc-erp-laravel.conf;
+}
+EOF
+    fi
 
     upsert_env "${ENV_FILE}" "APP_URL" "https://${CENTRAL_DOMAIN}"
 
@@ -384,17 +461,8 @@ systemctl reload nginx
 EOF
     sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
 else
-    sudo tee /etc/nginx/sites-available/kktc-erp.conf >/dev/null <<EOF
-server {
-    listen 80;
-    listen [::]:80;
-    server_name ${CENTRAL_DOMAIN} *.${DOMAIN};
-
-    include /etc/nginx/snippets/kktc-erp-laravel.conf;
-}
-EOF
-
-    upsert_env "${ENV_FILE}" "APP_URL" "http://${CENTRAL_DOMAIN}"
+    error "SSL was expected but not enabled. Aborting."
+    exit 1
 fi
 
 sudo ln -sf /etc/nginx/sites-available/kktc-erp.conf /etc/nginx/sites-enabled/kktc-erp.conf
@@ -403,7 +471,7 @@ sudo nginx -t
 sudo systemctl reload nginx
 
 log "Configuring scheduler cron..."
-(crontab -l 2>/dev/null; echo "* * * * * cd ${APP_PATH} && php artisan schedule:run >> /dev/null 2>&1") | crontab -
+(crontab -l 2>/dev/null | grep -v "php artisan schedule:run"; echo "* * * * * cd ${APP_PATH} && php artisan schedule:run >> /dev/null 2>&1") | crontab -
 
 log "Configuring Supervisor queue worker..."
 sudo mkdir -p /var/log/supervisor
@@ -440,4 +508,4 @@ echo
 echo "Next manual checks:"
 echo "  - php artisan tenants:list"
 echo "  - php artisan tenants:migrate --force"
-echo "  - sudo certbot renew --dry-run   (if SSL configured)"
+echo "  - sudo certbot renew --dry-run"
