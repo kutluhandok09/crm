@@ -36,7 +36,7 @@ class AuthenticatedSessionController extends Controller
 
             Auth::logout();
 
-            return redirect()->route('two-factor.challenge');
+            return redirect('/two-factor-challenge');
         }
 
         $request->session()->regenerate();

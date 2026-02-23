@@ -10,7 +10,7 @@
 
     <div class="mt-4 space-y-4">
         @if (! $twoFactorEnabled)
-            <form method="POST" action="{{ route('profile.two-factor.enable') }}">
+            <form method="POST" action="{{ route('profile.two-factor.enable', absolute: false) }}">
                 @csrf
                 <x-primary-button>2FA Etkinlestir</x-primary-button>
             </form>
@@ -36,7 +36,7 @@
             @endif
 
             @if (! $twoFactorConfirmed)
-                <form method="POST" action="{{ route('profile.two-factor.confirm') }}" class="space-y-3">
+                <form method="POST" action="{{ route('profile.two-factor.confirm', absolute: false) }}" class="space-y-3">
                     @csrf
                     <div>
                         <x-input-label for="code" value="Authenticator Kodu" />
@@ -50,7 +50,7 @@
             <div class="rounded-md border border-gray-200 p-4">
                 <div class="flex items-center justify-between">
                     <p class="text-sm font-medium text-gray-900">Recovery Codes</p>
-                    <form method="POST" action="{{ route('profile.two-factor.recovery-codes') }}">
+                    <form method="POST" action="{{ route('profile.two-factor.recovery-codes', absolute: false) }}">
                         @csrf
                         <button class="text-sm font-semibold text-indigo-600 hover:text-indigo-500" type="submit">
                             Yenile
@@ -66,7 +66,7 @@
                 </div>
             </div>
 
-            <form method="POST" action="{{ route('profile.two-factor.disable') }}" class="space-y-3">
+            <form method="POST" action="{{ route('profile.two-factor.disable', absolute: false) }}" class="space-y-3">
                 @csrf
                 <div>
                     <x-input-label for="current_password" value="2FA kapatmak icin mevcut sifre" />

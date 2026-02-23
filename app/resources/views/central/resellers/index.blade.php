@@ -9,7 +9,7 @@
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8 space-y-6">
             <div class="rounded-lg bg-white p-6 shadow">
                 <h3 class="text-lg font-semibold text-gray-900">Yeni Bayi Ekle</h3>
-                <form method="POST" action="{{ route('central.resellers.store') }}" class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                <form method="POST" action="{{ route('central.resellers.store', absolute: false) }}" class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                     @csrf
                     <div>
                         <x-input-label for="name" value="Ad Soyad" />

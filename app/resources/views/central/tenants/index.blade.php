@@ -4,7 +4,7 @@
             <h2 class="font-semibold text-xl text-gray-800 leading-tight">
                 Firma (Tenant) Yonetimi
             </h2>
-            <a href="{{ route('central.tenants.create') }}" class="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500">
+            <a href="{{ route('central.tenants.create', absolute: false) }}" class="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500">
                 Yeni Firma
             </a>
         </div>
@@ -32,7 +32,7 @@
                                     <td class="px-4 py-2 text-gray-700">{{ optional($tenant->domains->first())->domain ?? '-' }}</td>
                                     <td class="px-4 py-2 text-gray-700">{{ $tenant->reseller?->name ?? '-' }}</td>
                                     <td class="px-4 py-2">
-                                        <a class="text-indigo-600 hover:text-indigo-500" href="{{ route('central.tenants.show', $tenant) }}">
+                                        <a class="text-indigo-600 hover:text-indigo-500" href="{{ route('central.tenants.show', $tenant, false) }}">
                                             Detay
                                         </a>
                                     </td>

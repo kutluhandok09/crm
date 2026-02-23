@@ -4,7 +4,7 @@
             <h2 class="font-semibold text-xl text-gray-800 leading-tight">
                 Firma Detayi: {{ data_get($tenant->data, 'company_name', $tenant->id) }}
             </h2>
-            <a href="{{ route('central.tenants.index') }}" class="text-sm text-gray-600 hover:text-gray-900">Geri</a>
+            <a href="{{ route('central.tenants.index', absolute: false) }}" class="text-sm text-gray-600 hover:text-gray-900">Geri</a>
         </div>
     </x-slot>
 
@@ -38,7 +38,7 @@
             @can('manageUsers', $tenant)
                 <div class="rounded-lg bg-white p-6 shadow">
                     <h3 class="text-lg font-semibold text-gray-900">Firma Kullanici Ekle</h3>
-                    <form method="POST" action="{{ route('central.tenants.users.store', $tenant) }}" class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <form method="POST" action="{{ route('central.tenants.users.store', $tenant, false) }}" class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                         @csrf
                         <div>
                             <x-input-label for="name" value="Ad Soyad" />

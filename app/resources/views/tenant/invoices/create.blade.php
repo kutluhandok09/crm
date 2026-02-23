@@ -8,7 +8,7 @@
     <div class="py-10">
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
             <div class="rounded-lg bg-white p-6 shadow" x-data="invoiceForm()">
-                <form method="POST" action="{{ route('tenant.invoices.store') }}" class="space-y-6">
+                <form method="POST" action="{{ route('tenant.invoices.store', absolute: false) }}" class="space-y-6">
                     @csrf
 
                     <div class="grid grid-cols-1 gap-4 md:grid-cols-4">

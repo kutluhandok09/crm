@@ -4,7 +4,7 @@
             <h2 class="font-semibold text-xl text-gray-800 leading-tight">
                 Fatura: {{ $invoice->invoice_no }}
             </h2>
-            <a href="{{ route('tenant.invoices.index') }}" class="text-sm text-gray-600 hover:text-gray-900">Geri</a>
+            <a href="{{ route('tenant.invoices.index', absolute: false) }}" class="text-sm text-gray-600 hover:text-gray-900">Geri</a>
         </div>
     </x-slot>
 

@@ -52,7 +52,7 @@ foreach ($centralDomains as $centralDomain) {
             $home = Route::get('/', function () {
                 return auth()->check()
                     ? redirect('/dashboard')
-                    : redirect()->route('login');
+                    : redirect('/login');
             });
             if ($withNames) {
                 $home->name('home');

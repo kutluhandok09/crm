@@ -42,7 +42,7 @@ class ProductController extends Controller
         ]);
 
         return redirect()
-            ->route('tenant.products.index')
+            ->to(route('tenant.products.index', absolute: false))
             ->with('status', 'product-created');
     }
 }

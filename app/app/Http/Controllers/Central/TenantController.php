@@ -88,7 +88,7 @@ class TenantController extends Controller
         $tenant->createDomain(Str::lower($validated['domain']));
 
         return redirect()
-            ->route('central.tenants.show', $tenant)
+            ->to(route('central.tenants.show', $tenant, false))
             ->with('status', 'tenant-created');
     }
 
