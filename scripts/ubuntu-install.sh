@@ -1,0 +1,443 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DEFAULT_SOURCE_APP_DIR="${REPO_ROOT}/app"
+
+log() {
+    echo -e "\033[1;34m[INFO]\033[0m $*"
+}
+
+warn() {
+    echo -e "\033[1;33m[WARN]\033[0m $*"
+}
+
+error() {
+    echo -e "\033[1;31m[ERROR]\033[0m $*" >&2
+}
+
+require_command() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        error "Required command not found: $1"
+        exit 1
+    fi
+}
+
+ask() {
+    local prompt="$1"
+    local default_value="${2:-}"
+    local result=""
+
+    if [[ -n "${default_value}" ]]; then
+        read -r -p "${prompt} [${default_value}]: " result
+        echo "${result:-$default_value}"
+    else
+        read -r -p "${prompt}: " result
+        echo "${result}"
+    fi
+}
+
+ask_secret() {
+    local prompt="$1"
+    local result=""
+    read -r -s -p "${prompt}: " result
+    echo
+    echo "${result}"
+}
+
+confirm() {
+    local prompt="$1"
+    local answer=""
+    read -r -p "${prompt} [y/N]: " answer
+    [[ "${answer,,}" =~ ^(y|yes)$ ]]
+}
+
+ensure_not_empty() {
+    local value="$1"
+    local field="$2"
+    if [[ -z "${value}" ]]; then
+        error "${field} cannot be empty."
+        exit 1
+    fi
+}
+
+escape_sed() {
+    printf '%s' "$1" | sed -e 's/[\/&|]/\\&/g'
+}
+
+sql_escape() {
+    printf '%s' "$1" | sed "s/'/''/g"
+}
+
+upsert_env() {
+    local file="$1"
+    local key="$2"
+    local value="$3"
+    local escaped
+    escaped="$(escape_sed "${value}")"
+
+    if rg -q "^${key}=" "${file}"; then
+        sed -i "s|^${key}=.*|${key}=${escaped}|g" "${file}"
+    else
+        echo "${key}=${value}" >> "${file}"
+    fi
+}
+
+if [[ "${EUID}" -eq 0 ]]; then
+    error "Please run this script as a regular user with sudo privileges (not root)."
+    exit 1
+fi
+
+require_command sudo
+require_command rg
+require_command bash
+
+if [[ ! -f "${DEFAULT_SOURCE_APP_DIR}/artisan" ]]; then
+    warn "Default source app directory not found at ${DEFAULT_SOURCE_APP_DIR}."
+    warn "You can provide a custom path in prompts."
+fi
+
+if [[ -f /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    source /etc/os-release
+    if [[ "${ID:-}" != "ubuntu" ]]; then
+        warn "Detected OS: ${PRETTY_NAME:-unknown}. This script is optimized for Ubuntu 22.04/24.04."
+        confirm "Continue anyway?" || exit 1
+    fi
+fi
+
+log "KKTC ERP SaaS Ubuntu setup is starting."
+
+DOMAIN="$(ask "Primary domain (example: domain.com)")"
+ensure_not_empty "${DOMAIN}" "Primary domain"
+
+CENTRAL_SUBDOMAIN="$(ask "Central panel subdomain" "admin")"
+CENTRAL_DOMAIN="${CENTRAL_SUBDOMAIN}.${DOMAIN}"
+CENTRAL_DOMAINS="$(ask "Central domains CSV" "127.0.0.1,localhost,${CENTRAL_DOMAIN}")"
+
+APP_PATH="$(ask "Deploy path for Laravel app" "/var/www/kktc-erp-saas")"
+APP_USER="$(ask "System user owning project files" "${USER}")"
+SOURCE_APP_DIR="$(ask "Source Laravel app directory" "${DEFAULT_SOURCE_APP_DIR}")"
+ensure_not_empty "${SOURCE_APP_DIR}" "Source Laravel app directory"
+
+if [[ ! -f "${SOURCE_APP_DIR}/artisan" ]]; then
+    error "Invalid source app directory: ${SOURCE_APP_DIR} (artisan file missing)."
+    exit 1
+fi
+
+TIMEZONE="$(ask "Server timezone" "Europe/Istanbul")"
+PHP_VERSION="$(ask "PHP version (8.2/8.3)" "8.3")"
+NODE_MAJOR="$(ask "Node.js major version" "20")"
+
+DB_CENTRAL_DATABASE="$(ask "Central database name" "erp_central")"
+DB_APP_USER="$(ask "Database app user" "erp_app")"
+DB_APP_PASSWORD="$(ask_secret "Database app password")"
+ensure_not_empty "${DB_APP_PASSWORD}" "Database app password"
+DB_HOST="$(ask "Database host" "127.0.0.1")"
+DB_PORT="$(ask "Database port" "3306")"
+TENANT_DB_PREFIX="$(ask "Tenant database prefix" "tenant_")"
+
+RUN_SEED="no"
+if confirm "Run central db seed (creates super-admin user)?"; then
+    RUN_SEED="yes"
+fi
+
+INSTALL_SSL="no"
+CLOUDFLARE_API_TOKEN=""
+SSL_EMAIL=""
+if confirm "Configure wildcard SSL with Certbot?"; then
+    INSTALL_SSL="yes"
+    SSL_EMAIL="$(ask "SSL contact email" "admin@${DOMAIN}")"
+    CLOUDFLARE_API_TOKEN="$(ask_secret "Cloudflare API token for DNS challenge (leave empty to skip wildcard cert creation)")"
+fi
+
+log "Configuration summary"
+echo "  Domain:                  ${DOMAIN}"
+echo "  Central domain:          ${CENTRAL_DOMAIN}"
+echo "  Central domains:         ${CENTRAL_DOMAINS}"
+echo "  App path:                ${APP_PATH}"
+echo "  App owner user:          ${APP_USER}"
+echo "  Source app path:         ${SOURCE_APP_DIR}"
+echo "  PHP version:             ${PHP_VERSION}"
+echo "  Node major:              ${NODE_MAJOR}"
+echo "  DB host/port:            ${DB_HOST}:${DB_PORT}"
+echo "  Central DB:              ${DB_CENTRAL_DATABASE}"
+echo "  DB app user:             ${DB_APP_USER}"
+echo "  Tenant DB prefix:        ${TENANT_DB_PREFIX}"
+echo "  SSL requested:           ${INSTALL_SSL}"
+
+confirm "Proceed with installation?" || exit 1
+
+log "Installing system dependencies..."
+sudo apt update
+sudo apt install -y software-properties-common ca-certificates curl gnupg lsb-release unzip git rsync ufw
+sudo apt install -y nginx mariadb-server supervisor
+
+sudo add-apt-repository ppa:ondrej/php -y
+sudo apt update
+sudo apt install -y \
+    "php${PHP_VERSION}" \
+    "php${PHP_VERSION}-fpm" \
+    "php${PHP_VERSION}-cli" \
+    "php${PHP_VERSION}-common" \
+    "php${PHP_VERSION}-mysql" \
+    "php${PHP_VERSION}-mbstring" \
+    "php${PHP_VERSION}-xml" \
+    "php${PHP_VERSION}-curl" \
+    "php${PHP_VERSION}-zip" \
+    "php${PHP_VERSION}-bcmath" \
+    "php${PHP_VERSION}-intl" \
+    "php${PHP_VERSION}-gd" \
+    "php${PHP_VERSION}-sqlite3" \
+    composer
+
+curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | sudo -E bash -
+sudo apt install -y nodejs
+
+sudo timedatectl set-timezone "${TIMEZONE}" || warn "Failed to set timezone; continuing."
+
+log "Enabling services..."
+sudo systemctl enable --now nginx
+sudo systemctl enable --now mariadb
+sudo systemctl enable --now "php${PHP_VERSION}-fpm"
+sudo systemctl enable --now supervisor
+
+log "Configuring firewall..."
+sudo ufw allow OpenSSH
+sudo ufw allow "Nginx Full"
+sudo ufw --force enable
+
+log "Deploying application code..."
+sudo mkdir -p "${APP_PATH}"
+sudo rsync -a --delete "${SOURCE_APP_DIR}/" "${APP_PATH}/"
+sudo chown -R "${APP_USER}:www-data" "${APP_PATH}"
+
+cd "${APP_PATH}"
+
+log "Installing PHP/Node dependencies..."
+composer install --no-interaction --prefer-dist --optimize-autoloader
+npm install --no-audit --no-fund
+npm run build
+
+if [[ ! -f "${APP_PATH}/.env" ]]; then
+    cp "${APP_PATH}/.env.example" "${APP_PATH}/.env"
+fi
+
+ENV_FILE="${APP_PATH}/.env"
+upsert_env "${ENV_FILE}" "APP_NAME" "\"KKTC ERP SaaS\""
+upsert_env "${ENV_FILE}" "APP_ENV" "production"
+upsert_env "${ENV_FILE}" "APP_DEBUG" "false"
+upsert_env "${ENV_FILE}" "APP_URL" "https://${CENTRAL_DOMAIN}"
+upsert_env "${ENV_FILE}" "LOG_LEVEL" "info"
+upsert_env "${ENV_FILE}" "APP_TIMEZONE" "${TIMEZONE}"
+
+upsert_env "${ENV_FILE}" "DB_CONNECTION" "central"
+upsert_env "${ENV_FILE}" "DB_CENTRAL_CONNECTION" "central"
+upsert_env "${ENV_FILE}" "DB_CENTRAL_DRIVER" "mariadb"
+upsert_env "${ENV_FILE}" "DB_CENTRAL_HOST" "${DB_HOST}"
+upsert_env "${ENV_FILE}" "DB_CENTRAL_PORT" "${DB_PORT}"
+upsert_env "${ENV_FILE}" "DB_CENTRAL_DATABASE" "${DB_CENTRAL_DATABASE}"
+upsert_env "${ENV_FILE}" "DB_CENTRAL_USERNAME" "${DB_APP_USER}"
+upsert_env "${ENV_FILE}" "DB_CENTRAL_PASSWORD" "${DB_APP_PASSWORD}"
+upsert_env "${ENV_FILE}" "DB_CENTRAL_STRICT_MODE" "true"
+
+upsert_env "${ENV_FILE}" "DB_HOST" "${DB_HOST}"
+upsert_env "${ENV_FILE}" "DB_PORT" "${DB_PORT}"
+upsert_env "${ENV_FILE}" "DB_DATABASE" "${DB_CENTRAL_DATABASE}"
+upsert_env "${ENV_FILE}" "DB_USERNAME" "${DB_APP_USER}"
+upsert_env "${ENV_FILE}" "DB_PASSWORD" "${DB_APP_PASSWORD}"
+
+upsert_env "${ENV_FILE}" "CENTRAL_DOMAINS" "${CENTRAL_DOMAINS}"
+upsert_env "${ENV_FILE}" "TENANCY_DB_PREFIX" "${TENANT_DB_PREFIX}"
+upsert_env "${ENV_FILE}" "TENANCY_DB_SUFFIX" ""
+upsert_env "${ENV_FILE}" "DB_TENANT_DRIVER" "mariadb"
+upsert_env "${ENV_FILE}" "DB_TENANT_HOST" "${DB_HOST}"
+upsert_env "${ENV_FILE}" "DB_TENANT_PORT" "${DB_PORT}"
+upsert_env "${ENV_FILE}" "DB_TENANT_USERNAME" "${DB_APP_USER}"
+upsert_env "${ENV_FILE}" "DB_TENANT_PASSWORD" "${DB_APP_PASSWORD}"
+upsert_env "${ENV_FILE}" "DB_TENANT_STRICT_MODE" "true"
+
+upsert_env "${ENV_FILE}" "SESSION_DRIVER" "database"
+upsert_env "${ENV_FILE}" "CACHE_STORE" "database"
+upsert_env "${ENV_FILE}" "QUEUE_CONNECTION" "database"
+
+log "Preparing MariaDB central database and user grants..."
+DB_APP_USER_SQL="$(sql_escape "${DB_APP_USER}")"
+DB_APP_PASSWORD_SQL="$(sql_escape "${DB_APP_PASSWORD}")"
+DB_CENTRAL_DATABASE_SQL="$(sql_escape "${DB_CENTRAL_DATABASE}")"
+
+sudo mariadb <<SQL
+CREATE DATABASE IF NOT EXISTS \`${DB_CENTRAL_DATABASE_SQL}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '${DB_APP_USER_SQL}'@'localhost' IDENTIFIED BY '${DB_APP_PASSWORD_SQL}';
+CREATE USER IF NOT EXISTS '${DB_APP_USER_SQL}'@'127.0.0.1' IDENTIFIED BY '${DB_APP_PASSWORD_SQL}';
+GRANT ALL PRIVILEGES ON \`${DB_CENTRAL_DATABASE_SQL}\`.* TO '${DB_APP_USER_SQL}'@'localhost';
+GRANT ALL PRIVILEGES ON \`${DB_CENTRAL_DATABASE_SQL}\`.* TO '${DB_APP_USER_SQL}'@'127.0.0.1';
+GRANT CREATE, ALTER, DROP, INDEX, REFERENCES ON *.* TO '${DB_APP_USER_SQL}'@'localhost';
+GRANT CREATE, ALTER, DROP, INDEX, REFERENCES ON *.* TO '${DB_APP_USER_SQL}'@'127.0.0.1';
+FLUSH PRIVILEGES;
+SQL
+
+log "Running Laravel setup commands..."
+php artisan key:generate --force
+php artisan config:clear
+php artisan cache:clear || true
+php artisan migrate --database=central --force
+
+if [[ "${RUN_SEED}" == "yes" ]]; then
+    php artisan db:seed --database=central --force
+fi
+
+php artisan storage:link || true
+php artisan optimize
+
+sudo chown -R www-data:www-data "${APP_PATH}/storage" "${APP_PATH}/bootstrap/cache"
+sudo chmod -R 775 "${APP_PATH}/storage" "${APP_PATH}/bootstrap/cache"
+
+log "Writing Nginx configuration..."
+sudo tee /etc/nginx/snippets/kktc-erp-laravel.conf >/dev/null <<EOF
+root ${APP_PATH}/public;
+index index.php index.html;
+
+location / {
+    try_files \$uri \$uri/ /index.php?\$query_string;
+}
+
+location ~ \.php$ {
+    include snippets/fastcgi-php.conf;
+    fastcgi_pass unix:/run/php/php${PHP_VERSION}-fpm.sock;
+}
+
+location ~ /\.(?!well-known).* {
+    deny all;
+}
+EOF
+
+SSL_ENABLED="no"
+
+if [[ "${INSTALL_SSL}" == "yes" ]]; then
+    if [[ -n "${CLOUDFLARE_API_TOKEN}" ]]; then
+        log "Installing Certbot DNS plugin for Cloudflare..."
+        sudo apt install -y certbot python3-certbot-dns-cloudflare
+        sudo tee /etc/letsencrypt/cloudflare.ini >/dev/null <<EOF
+dns_cloudflare_api_token = ${CLOUDFLARE_API_TOKEN}
+EOF
+        sudo chmod 600 /etc/letsencrypt/cloudflare.ini
+
+        log "Requesting wildcard certificate (*.${DOMAIN})..."
+        sudo certbot certonly \
+            --dns-cloudflare \
+            --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini \
+            -d "${DOMAIN}" \
+            -d "*.${DOMAIN}" \
+            --agree-tos \
+            -m "${SSL_EMAIL}" \
+            --no-eff-email || warn "Certificate request failed. Continuing without SSL."
+    else
+        warn "Cloudflare token not provided; wildcard certificate step skipped."
+    fi
+
+    if [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
+        SSL_ENABLED="yes"
+    fi
+fi
+
+if [[ "${SSL_ENABLED}" == "yes" ]]; then
+    sudo tee /etc/nginx/sites-available/kktc-erp.conf >/dev/null <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${CENTRAL_DOMAIN} *.${DOMAIN};
+    return 301 https://\$host\$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${CENTRAL_DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+
+    include /etc/nginx/snippets/kktc-erp-laravel.conf;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name *.${DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+
+    include /etc/nginx/snippets/kktc-erp-laravel.conf;
+}
+EOF
+
+    upsert_env "${ENV_FILE}" "APP_URL" "https://${CENTRAL_DOMAIN}"
+
+    sudo mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+    sudo tee /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh >/dev/null <<'EOF'
+#!/usr/bin/env bash
+systemctl reload nginx
+EOF
+    sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+else
+    sudo tee /etc/nginx/sites-available/kktc-erp.conf >/dev/null <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${CENTRAL_DOMAIN} *.${DOMAIN};
+
+    include /etc/nginx/snippets/kktc-erp-laravel.conf;
+}
+EOF
+
+    upsert_env "${ENV_FILE}" "APP_URL" "http://${CENTRAL_DOMAIN}"
+fi
+
+sudo ln -sf /etc/nginx/sites-available/kktc-erp.conf /etc/nginx/sites-enabled/kktc-erp.conf
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t
+sudo systemctl reload nginx
+
+log "Configuring scheduler cron..."
+(crontab -l 2>/dev/null; echo "* * * * * cd ${APP_PATH} && php artisan schedule:run >> /dev/null 2>&1") | crontab -
+
+log "Configuring Supervisor queue worker..."
+sudo mkdir -p /var/log/supervisor
+sudo tee /etc/supervisor/conf.d/kktc-erp-worker.conf >/dev/null <<EOF
+[program:kktc-erp-worker]
+process_name=%(program_name)s_%(process_num)02d
+command=php ${APP_PATH}/artisan queue:work --sleep=3 --tries=3 --max-time=3600
+directory=${APP_PATH}
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+user=www-data
+numprocs=1
+redirect_stderr=true
+stdout_logfile=/var/log/supervisor/kktc-erp-worker.log
+stopwaitsecs=3600
+EOF
+
+sudo supervisorctl reread
+sudo supervisorctl update
+sudo supervisorctl start kktc-erp-worker:* || true
+
+log "Installation completed."
+echo
+echo "Central URL : $(if [[ "${SSL_ENABLED}" == "yes" ]]; then echo "https"; else echo "http"; fi)://${CENTRAL_DOMAIN}"
+echo "Tenant URL  : $(if [[ "${SSL_ENABLED}" == "yes" ]]; then echo "https"; else echo "http"; fi)://<tenant>.${DOMAIN}"
+echo "App path    : ${APP_PATH}"
+echo
+echo "If seed was enabled, default admin user:"
+echo "  Email: admin@domain.com"
+echo "  Password: Admin12345!"
+echo
+echo "Next manual checks:"
+echo "  - php artisan tenants:list"
+echo "  - php artisan tenants:migrate --force"
+echo "  - sudo certbot renew --dry-run   (if SSL configured)"

@@ -63,7 +63,7 @@ return [
         ],
 
         'central' => [
-            'driver' => 'mysql',
+            'driver' => env('DB_CENTRAL_DRIVER', 'mariadb'),
             'url' => env('DB_CENTRAL_URL'),
             'host' => env('DB_CENTRAL_HOST', env('DB_HOST', '127.0.0.1')),
             'port' => env('DB_CENTRAL_PORT', env('DB_PORT', '3306')),
@@ -75,7 +75,7 @@ return [
             'collation' => env('DB_CENTRAL_COLLATION', env('DB_COLLATION', 'utf8mb4_unicode_ci')),
             'prefix' => '',
             'prefix_indexes' => true,
-            'strict' => true,
+            'strict' => env('DB_CENTRAL_STRICT_MODE', true),
             'engine' => null,
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
@@ -83,7 +83,8 @@ return [
         ],
 
         'tenant' => [
-            'driver' => 'mysql',
+            'driver' => env('DB_TENANT_DRIVER', env('DB_CENTRAL_DRIVER', 'mariadb')),
+            'url' => env('DB_TENANT_URL'),
             'host' => env('DB_TENANT_HOST', env('DB_CENTRAL_HOST', env('DB_HOST', '127.0.0.1'))),
             'port' => env('DB_TENANT_PORT', env('DB_CENTRAL_PORT', env('DB_PORT', '3306'))),
             'database' => null, // Filled dynamically by stancl/tenancy
@@ -94,7 +95,7 @@ return [
             'collation' => env('DB_TENANT_COLLATION', env('DB_CENTRAL_COLLATION', env('DB_COLLATION', 'utf8mb4_unicode_ci'))),
             'prefix' => '',
             'prefix_indexes' => true,
-            'strict' => true,
+            'strict' => env('DB_TENANT_STRICT_MODE', env('DB_CENTRAL_STRICT_MODE', true)),
             'engine' => null,
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
