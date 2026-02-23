@@ -96,7 +96,14 @@ sudo -u "${RUN_AS}" env \
     ADMIN_EMAIL="${ADMIN_EMAIL}" \
     ADMIN_USERNAME="${ADMIN_USERNAME}" \
     ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
-    php artisan tinker --execute='
+    php <<'PHP'
+<?php
+require __DIR__.'/vendor/autoload.php';
+
+$app = require __DIR__.'/bootstrap/app.php';
+$kernel = $app->make(Illuminate\Contracts\Console\Kernel::class);
+$kernel->bootstrap();
+
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
 use Spatie\Permission\Models\Role;
@@ -132,6 +139,6 @@ if (! $user) {
 $user->syncRoles(["super-admin"]);
 
 echo "Super-admin ready: ".$user->email.PHP_EOL;
-'
+PHP
 
 log "Done."
