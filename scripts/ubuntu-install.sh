@@ -419,7 +419,14 @@ if (!$adminPassword) {
     exit(1);
 }
 
-$user = \App\Models\User::query()->where('email', 'admin@domain.com')->first();
+$user = \App\Models\User::query()
+    ->where('username', 'superadmin')
+    ->orWhere('email', 'admin@domain.com')
+    ->orderBy('id')
+    ->first();
+if (!$user) {
+    $user = \App\Models\User::role('super-admin')->orderBy('id')->first();
+}
 if (!$user) {
     $user = \App\Models\User::query()->orderBy('id')->first();
 }
@@ -429,9 +436,21 @@ if (!$user) {
     exit(1);
 }
 
-$user->email = strtolower($adminEmail);
+$newEmail = strtolower($adminEmail);
+$emailIsUsedByAnother = \App\Models\User::query()
+    ->where('email', $newEmail)
+    ->where('id', '!=', $user->id)
+    ->exists();
+
+if (! $emailIsUsedByAnother) {
+    $user->email = $newEmail;
+} else {
+    fwrite(STDERR, "Warning: Requested admin email is already used by another account; keeping current email.\n");
+}
+
 $user->password = \Illuminate\Support\Facades\Hash::make($adminPassword);
 $user->save();
+$user->assignRole('super-admin');
 PHP
 fi
 
