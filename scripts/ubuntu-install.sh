@@ -312,11 +312,6 @@ sudo chown -R "${APP_USER}:www-data" "${APP_PATH}"
 
 cd "${APP_PATH}"
 
-log "Installing PHP/Node dependencies..."
-run_as_app_user composer install --no-interaction --prefer-dist --optimize-autoloader
-run_as_app_user npm install --no-audit --no-fund
-run_as_app_user npm run build
-
 if [[ -f "${APP_PATH}/.env" ]]; then
     cp "${APP_PATH}/.env" "${APP_PATH}/.env.backup.$(date +%Y%m%d%H%M%S)"
 fi
@@ -360,6 +355,11 @@ upsert_env "${ENV_FILE}" "SESSION_DRIVER" "database"
 upsert_env "${ENV_FILE}" "CACHE_STORE" "database"
 upsert_env "${ENV_FILE}" "QUEUE_CONNECTION" "database"
 
+log "Installing PHP/Node dependencies..."
+run_as_app_user composer install --no-interaction --prefer-dist --optimize-autoloader --no-scripts
+run_as_app_user npm install --no-audit --no-fund
+run_as_app_user npm run build
+
 log "Preparing MariaDB central database and user grants..."
 DB_APP_PASSWORD_SQL="$(sql_escape "${DB_APP_PASSWORD}")"
 DB_CENTRAL_DATABASE_SQL="${DB_CENTRAL_DATABASE}"
@@ -394,6 +394,7 @@ run_artisan_with_db_env() {
 }
 
 log "Running Laravel setup commands..."
+run_artisan_with_db_env php artisan package:discover --ansi
 run_as_app_user php artisan key:generate --force
 run_as_app_user php artisan config:clear
 run_artisan_with_db_env php artisan migrate --database=central --force
