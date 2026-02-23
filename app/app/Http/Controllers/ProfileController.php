@@ -52,7 +52,7 @@ class ProfileController extends Controller
 
         $request->user()->save();
 
-        return Redirect::route('profile.edit')->with('status', 'profile-updated');
+        return Redirect::to(route('profile.edit', absolute: false))->with('status', 'profile-updated');
     }
 
     public function enableTwoFactor(Request $request): RedirectResponse
@@ -67,13 +67,13 @@ class ProfileController extends Controller
             'two_factor_confirmed_at' => null,
         ])->save();
 
-        return Redirect::route('profile.edit')->with('status', 'two-factor-enabled');
+        return Redirect::to(route('profile.edit', absolute: false))->with('status', 'two-factor-enabled');
     }
 
     public function confirmTwoFactor(Request $request): RedirectResponse
     {
         $request->validate([
-            'code' => ['required', 'string'],
+            'code' => ['required', 'digits:6'],
         ]);
 
         $user = $request->user();
@@ -89,7 +89,7 @@ class ProfileController extends Controller
             'two_factor_confirmed_at' => now(),
         ])->save();
 
-        return Redirect::route('profile.edit')->with('status', 'two-factor-confirmed');
+        return Redirect::to(route('profile.edit', absolute: false))->with('status', 'two-factor-confirmed');
     }
 
     public function disableTwoFactor(Request $request): RedirectResponse
@@ -104,7 +104,7 @@ class ProfileController extends Controller
             'two_factor_confirmed_at' => null,
         ])->save();
 
-        return Redirect::route('profile.edit')->with('status', 'two-factor-disabled');
+        return Redirect::to(route('profile.edit', absolute: false))->with('status', 'two-factor-disabled');
     }
 
     public function regenerateRecoveryCodes(Request $request): RedirectResponse
@@ -115,7 +115,7 @@ class ProfileController extends Controller
             'two_factor_recovery_codes' => Crypt::encryptString(json_encode($codes)),
         ])->save();
 
-        return Redirect::route('profile.edit')->with('status', 'recovery-codes-regenerated');
+        return Redirect::to(route('profile.edit', absolute: false))->with('status', 'recovery-codes-regenerated');
     }
 
     /**

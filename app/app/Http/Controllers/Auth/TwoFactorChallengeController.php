@@ -22,7 +22,7 @@ class TwoFactorChallengeController extends Controller
     public function create(Request $request): View|RedirectResponse
     {
         if (! $request->session()->has('two_factor_login.user_id')) {
-            return redirect()->route('login');
+            return redirect('/login');
         }
 
         return view('auth.two-factor-challenge');
@@ -31,8 +31,8 @@ class TwoFactorChallengeController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $request->validate([
-            'code' => ['nullable', 'string'],
-            'recovery_code' => ['nullable', 'string'],
+            'code' => ['nullable', 'digits:6'],
+            'recovery_code' => ['nullable', 'string', 'max:32'],
         ]);
 
         $userId = $request->session()->get('two_factor_login.user_id');
@@ -43,7 +43,7 @@ class TwoFactorChallengeController extends Controller
         if (! $user) {
             $request->session()->forget('two_factor_login');
 
-            return redirect()->route('login');
+            return redirect('/login');
         }
 
         $valid = false;

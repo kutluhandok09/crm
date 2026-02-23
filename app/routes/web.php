@@ -7,30 +7,87 @@ use App\Http\Controllers\Central\TenantUserController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
 
-foreach (config('tenancy.central_domains', []) as $centralDomain) {
+/**
+ * Register central routes for each allowed central domain.
+ *
+ * Important: we only assign route names on the first (primary) domain.
+ * Otherwise Laravel keeps the last duplicate name and URL generation may
+ * unexpectedly point to localhost/another domain.
+ */
+$centralDomains = array_values(config('tenancy.central_domains', []));
+$appUrlHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+$normalizedAppUrlHost = is_string($appUrlHost) ? strtolower(trim($appUrlHost)) : null;
+
+$primaryCentralDomain = null;
+if (
+    is_string($appUrlHost)
+    && in_array($appUrlHost, $centralDomains, true)
+    && ! in_array($normalizedAppUrlHost, ['localhost', '127.0.0.1', '::1'], true)
+    && filter_var($appUrlHost, FILTER_VALIDATE_IP) === false
+) {
+    $primaryCentralDomain = $appUrlHost;
+} else {
+    $nonLocalCentralDomains = array_values(array_filter(
+        $centralDomains,
+        static function (string $domain): bool {
+            $normalized = strtolower(trim($domain));
+
+            if (in_array($normalized, ['localhost', '127.0.0.1', '::1'], true)) {
+                return false;
+            }
+
+            return filter_var($normalized, FILTER_VALIDATE_IP) === false;
+        }
+    ));
+
+    $primaryCentralDomain = $nonLocalCentralDomains[0] ?? ($centralDomains[0] ?? null);
+}
+
+foreach ($centralDomains as $centralDomain) {
+    $withNames = $centralDomain === $primaryCentralDomain;
+
     Route::domain($centralDomain)
         ->middleware('central.domain')
-        ->group(function () {
-            Route::get('/', function () {
+        ->group(function () use ($withNames) {
+            $home = Route::get('/', function () {
                 return auth()->check()
-                    ? redirect()->route('dashboard')
-                    : redirect()->route('login');
-            })->name('home');
+                    ? redirect('/dashboard')
+                    : redirect('/login');
+            });
+            if ($withNames) {
+                $home->name('home');
+            }
 
-            Route::middleware('auth')->group(function () {
-                Route::get('/dashboard', DashboardController::class)->name('dashboard');
+            Route::middleware('auth')->group(function () use ($withNames) {
+                $dashboard = Route::get('/dashboard', DashboardController::class);
+                if ($withNames) {
+                    $dashboard->name('dashboard');
+                }
 
-                Route::prefix('central')->name('central.')->group(function () {
-                    Route::middleware('role:super-admin')->group(function () {
-                        Route::get('/resellers', [ResellerController::class, 'index'])->name('resellers.index');
-                        Route::post('/resellers', [ResellerController::class, 'store'])->name('resellers.store');
+                Route::prefix('central')->group(function () use ($withNames) {
+                    Route::middleware('role:super-admin')->group(function () use ($withNames) {
+                        $resellersIndex = Route::get('/resellers', [ResellerController::class, 'index']);
+                        $resellersStore = Route::post('/resellers', [ResellerController::class, 'store']);
+
+                        if ($withNames) {
+                            $resellersIndex->name('central.resellers.index');
+                            $resellersStore->name('central.resellers.store');
+                        }
                     });
 
-                    Route::get('/tenants', [TenantController::class, 'index'])->name('tenants.index');
-                    Route::get('/tenants/create', [TenantController::class, 'create'])->name('tenants.create');
-                    Route::post('/tenants', [TenantController::class, 'store'])->name('tenants.store');
-                    Route::get('/tenants/{tenant}', [TenantController::class, 'show'])->name('tenants.show');
-                    Route::post('/tenants/{tenant}/users', [TenantUserController::class, 'store'])->name('tenants.users.store');
+                    $tenantsIndex = Route::get('/tenants', [TenantController::class, 'index']);
+                    $tenantsCreate = Route::get('/tenants/create', [TenantController::class, 'create']);
+                    $tenantsStore = Route::post('/tenants', [TenantController::class, 'store']);
+                    $tenantsShow = Route::get('/tenants/{tenant}', [TenantController::class, 'show']);
+                    $tenantUsersStore = Route::post('/tenants/{tenant}/users', [TenantUserController::class, 'store']);
+
+                    if ($withNames) {
+                        $tenantsIndex->name('central.tenants.index');
+                        $tenantsCreate->name('central.tenants.create');
+                        $tenantsStore->name('central.tenants.store');
+                        $tenantsShow->name('central.tenants.show');
+                        $tenantUsersStore->name('central.tenants.users.store');
+                    }
                 });
             });
         });

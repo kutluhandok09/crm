@@ -3,31 +3,31 @@
         <div class="flex justify-between h-16">
             <div class="flex">
                 <div class="shrink-0 flex items-center">
-                    <a href="{{ request()->routeIs('tenant.*') ? route('tenant.dashboard') : route('dashboard') }}">
+                    <a href="{{ request()->routeIs('tenant.*') ? route('tenant.dashboard', absolute: false) : route('dashboard', absolute: false) }}">
                         <x-application-logo class="block h-9 w-auto fill-current text-gray-800" />
                     </a>
                 </div>
 
                 <div class="hidden space-x-8 sm:-my-px sm:ms-10 sm:flex">
                     @if (request()->routeIs('tenant.*'))
-                        <x-nav-link :href="route('tenant.dashboard')" :active="request()->routeIs('tenant.dashboard')">
+                        <x-nav-link :href="route('tenant.dashboard', absolute: false)" :active="request()->routeIs('tenant.dashboard')">
                             Tenant Panel
                         </x-nav-link>
-                        <x-nav-link :href="route('tenant.products.index')" :active="request()->routeIs('tenant.products.*')">
+                        <x-nav-link :href="route('tenant.products.index', absolute: false)" :active="request()->routeIs('tenant.products.*')">
                             Urunler
                         </x-nav-link>
-                        <x-nav-link :href="route('tenant.invoices.index')" :active="request()->routeIs('tenant.invoices.*')">
+                        <x-nav-link :href="route('tenant.invoices.index', absolute: false)" :active="request()->routeIs('tenant.invoices.*')">
                             Faturalar
                         </x-nav-link>
                     @else
-                        <x-nav-link :href="route('dashboard')" :active="request()->routeIs('dashboard')">
+                        <x-nav-link :href="route('dashboard', absolute: false)" :active="request()->routeIs('dashboard')">
                             Merkezi Dashboard
                         </x-nav-link>
-                        <x-nav-link :href="route('central.tenants.index')" :active="request()->routeIs('central.tenants.*')">
+                        <x-nav-link :href="route('central.tenants.index', absolute: false)" :active="request()->routeIs('central.tenants.*')">
                             Firmalar
                         </x-nav-link>
                         @if (auth()->user()->isSuperAdmin())
-                            <x-nav-link :href="route('central.resellers.index')" :active="request()->routeIs('central.resellers.*')">
+                            <x-nav-link :href="route('central.resellers.index', absolute: false)" :active="request()->routeIs('central.resellers.*')">
                                 Bayiler
                             </x-nav-link>
                         @endif
@@ -48,13 +48,13 @@
                     </x-slot>
 
                     <x-slot name="content">
-                        <x-dropdown-link :href="route('profile.edit')">
+                        <x-dropdown-link :href="route('profile.edit', absolute: false)">
                             Profil
                         </x-dropdown-link>
 
-                        <form method="POST" action="{{ route('logout') }}">
+                        <form method="POST" action="{{ route('logout', absolute: false) }}">
                             @csrf
-                            <x-dropdown-link :href="route('logout')"
+                            <x-dropdown-link :href="route('logout', absolute: false)"
                                 onclick="event.preventDefault(); this.closest('form').submit();">
                                 Cikis
                             </x-dropdown-link>
@@ -77,24 +77,24 @@
     <div :class="{'block': open, 'hidden': ! open}" class="hidden sm:hidden">
         <div class="pt-2 pb-3 space-y-1">
             @if (request()->routeIs('tenant.*'))
-                <x-responsive-nav-link :href="route('tenant.dashboard')" :active="request()->routeIs('tenant.dashboard')">
+                <x-responsive-nav-link :href="route('tenant.dashboard', absolute: false)" :active="request()->routeIs('tenant.dashboard')">
                     Tenant Panel
                 </x-responsive-nav-link>
-                <x-responsive-nav-link :href="route('tenant.products.index')" :active="request()->routeIs('tenant.products.*')">
+                <x-responsive-nav-link :href="route('tenant.products.index', absolute: false)" :active="request()->routeIs('tenant.products.*')">
                     Urunler
                 </x-responsive-nav-link>
-                <x-responsive-nav-link :href="route('tenant.invoices.index')" :active="request()->routeIs('tenant.invoices.*')">
+                <x-responsive-nav-link :href="route('tenant.invoices.index', absolute: false)" :active="request()->routeIs('tenant.invoices.*')">
                     Faturalar
                 </x-responsive-nav-link>
             @else
-                <x-responsive-nav-link :href="route('dashboard')" :active="request()->routeIs('dashboard')">
+                <x-responsive-nav-link :href="route('dashboard', absolute: false)" :active="request()->routeIs('dashboard')">
                     Merkezi Dashboard
                 </x-responsive-nav-link>
-                <x-responsive-nav-link :href="route('central.tenants.index')" :active="request()->routeIs('central.tenants.*')">
+                <x-responsive-nav-link :href="route('central.tenants.index', absolute: false)" :active="request()->routeIs('central.tenants.*')">
                     Firmalar
                 </x-responsive-nav-link>
                 @if (auth()->user()->isSuperAdmin())
-                    <x-responsive-nav-link :href="route('central.resellers.index')" :active="request()->routeIs('central.resellers.*')">
+                    <x-responsive-nav-link :href="route('central.resellers.index', absolute: false)" :active="request()->routeIs('central.resellers.*')">
                         Bayiler
                     </x-responsive-nav-link>
                 @endif
@@ -108,13 +108,13 @@
             </div>
 
             <div class="mt-3 space-y-1">
-                <x-responsive-nav-link :href="route('profile.edit')">
+                <x-responsive-nav-link :href="route('profile.edit', absolute: false)">
                     Profil
                 </x-responsive-nav-link>
 
-                <form method="POST" action="{{ route('logout') }}">
+                <form method="POST" action="{{ route('logout', absolute: false) }}">
                     @csrf
-                    <x-responsive-nav-link :href="route('logout')"
+                    <x-responsive-nav-link :href="route('logout', absolute: false)"
                         onclick="event.preventDefault(); this.closest('form').submit();">
                         Cikis
                     </x-responsive-nav-link>

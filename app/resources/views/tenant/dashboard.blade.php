@@ -13,11 +13,11 @@
             </div>
 
             <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <a href="{{ route('tenant.products.index') }}" class="rounded-lg border border-gray-200 bg-white p-5 shadow-sm hover:border-indigo-300">
+                <a href="{{ route('tenant.products.index', absolute: false) }}" class="rounded-lg border border-gray-200 bg-white p-5 shadow-sm hover:border-indigo-300">
                     <p class="text-sm text-gray-500">Stok</p>
                     <p class="mt-2 text-lg font-semibold text-gray-900">Urunleri Yonet</p>
                 </a>
-                <a href="{{ route('tenant.invoices.index') }}" class="rounded-lg border border-gray-200 bg-white p-5 shadow-sm hover:border-indigo-300">
+                <a href="{{ route('tenant.invoices.index', absolute: false) }}" class="rounded-lg border border-gray-200 bg-white p-5 shadow-sm hover:border-indigo-300">
                     <p class="text-sm text-gray-500">Satis / Alis</p>
                     <p class="mt-2 text-lg font-semibold text-gray-900">Faturalar</p>
                 </a>

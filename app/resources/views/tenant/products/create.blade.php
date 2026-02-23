@@ -8,7 +8,7 @@
     <div class="py-10">
         <div class="max-w-4xl mx-auto sm:px-6 lg:px-8">
             <div class="rounded-lg bg-white p-6 shadow">
-                <form method="POST" action="{{ route('tenant.products.store') }}" class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <form method="POST" action="{{ route('tenant.products.store', absolute: false) }}" class="grid grid-cols-1 gap-4 md:grid-cols-2">
                     @csrf
                     <div class="md:col-span-2">
                         <x-input-label for="name" value="Urun Adi" />
@@ -70,7 +70,7 @@
 
                     <div class="md:col-span-2 flex items-center gap-3">
                         <x-primary-button>Kaydet</x-primary-button>
-                        <a href="{{ route('tenant.products.index') }}" class="text-sm text-gray-600 hover:text-gray-900">Iptal</a>
+                        <a href="{{ route('tenant.products.index', absolute: false) }}" class="text-sm text-gray-600 hover:text-gray-900">Iptal</a>
                     </div>
                 </form>
             </div>

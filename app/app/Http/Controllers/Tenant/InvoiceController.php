@@ -88,7 +88,7 @@ class InvoiceController extends Controller
         ], $request->user()?->getKey());
 
         return redirect()
-            ->route('tenant.invoices.show', $invoice)
+            ->to(route('tenant.invoices.show', $invoice, false))
             ->with('status', 'invoice-posted');
     }
 

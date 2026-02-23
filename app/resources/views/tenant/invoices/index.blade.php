@@ -5,10 +5,10 @@
                 Faturalar
             </h2>
             <div class="flex items-center gap-2">
-                <a href="{{ route('tenant.invoices.create', ['type' => 'sale']) }}" class="inline-flex items-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-500">
+                <a href="{{ route('tenant.invoices.create', ['type' => 'sale'], false) }}" class="inline-flex items-center rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-500">
                     Hizli Satis
                 </a>
-                <a href="{{ route('tenant.invoices.create', ['type' => 'purchase']) }}" class="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500">
+                <a href="{{ route('tenant.invoices.create', ['type' => 'purchase'], false) }}" class="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-indigo-500">
                     Alis Faturasi
                 </a>
             </div>
@@ -51,7 +51,7 @@
                                     <td class="px-4 py-2 text-gray-700">{{ $invoice->grand_total }}</td>
                                     <td class="px-4 py-2 text-gray-700">{{ strtoupper($invoice->status) }}</td>
                                     <td class="px-4 py-2">
-                                        <a href="{{ route('tenant.invoices.show', $invoice) }}" class="text-indigo-600 hover:text-indigo-500">
+                                        <a href="{{ route('tenant.invoices.show', $invoice, false) }}" class="text-indigo-600 hover:text-indigo-500">
                                             Detay
                                         </a>
                                     </td>

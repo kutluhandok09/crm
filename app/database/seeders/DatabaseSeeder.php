@@ -18,13 +18,19 @@ class DatabaseSeeder extends Seeder
         Role::findOrCreate('reseller', 'web');
         Role::findOrCreate('company-user', 'web');
 
-        $admin = User::query()->firstOrCreate([
-            'email' => 'admin@domain.com',
-        ], [
-            'name' => 'Super Admin',
-            'username' => 'superadmin',
-            'password' => Hash::make('Admin12345!'),
-        ]);
+        $admin = User::query()
+            ->where('username', 'superadmin')
+            ->orWhere('email', 'admin@domain.com')
+            ->first();
+
+        if (! $admin) {
+            $admin = User::query()->create([
+                'name' => 'Super Admin',
+                'username' => 'superadmin',
+                'email' => 'admin@domain.com',
+                'password' => Hash::make('Admin12345!'),
+            ]);
+        }
 
         $admin->assignRole('super-admin');
     }

@@ -53,14 +53,18 @@ bash scripts/ubuntu-install.sh
 
 Script senden su bilgileri ister:
 
-- ana domain (`domain.com`)
+- ana domain (`domain.com`) - URL de girsen normalize edilir (`https://domain.com/` -> `domain.com`)
 - central subdomain (`admin`)
+- central domains CSV (onerilen: `admin.domain.com,domain.com`)
 - app kurulum yolu (`/var/www/kktc-erp-saas`)
 - PHP surumu (onerilen `8.3`)
 - Node LTS surumu (onerilen `20`)
 - MariaDB veritabani bilgileri
 - tenant veritabani prefix
-- wildcard SSL icin Cloudflare API token (opsiyonel ama onerilir)
+- SSL modu:
+  - `wildcard-cloudflare` (onerilen, tenant wildcard SSL icin)
+  - `central-only` (sadece merkezi domain SSL)
+- wildcard mod secilirse Cloudflare API token (zorunlu)
 
 ### 2) Script ne yapar?
 
@@ -71,7 +75,9 @@ Script senden su bilgileri ister:
 - Central DB olusturur ve yetki verir
 - Migration + (opsiyonel) seed calistirir
 - Nginx merkezi + wildcard domain konfigurasyonunu yazar
-- SSL (Cloudflare DNS challenge ile) wildcard sertifika alir
+- SSL sertifikasi olusturur:
+  - wildcard modda `domain.com` + `*.domain.com`
+  - central-only modda sadece `admin.domain.com`
 - Cron scheduler ve Supervisor queue worker kurar
 
 ---
@@ -93,12 +99,7 @@ php artisan serve
 
 ## Ilk Giris
 
-Default seed ile:
-
-- Email: `admin@domain.com`
-- Sifre: `Admin12345!`
-
-> Canli ortamda ilk giristen sonra sifreyi degistirmen zorunlu tavsiye edilir.
+Seed acildiysa script kurulum sirasinda senden **ilk super-admin email ve sifresini** ister ve o degerleri uygular.
 
 ---
 
@@ -116,6 +117,16 @@ php artisan migrate --database=central --force
 ```bash
 cd app
 php artisan tenants:migrate --force
+```
+
+### Super-admin olusturma/guncelleme scripti
+
+```bash
+bash scripts/create-superadmin.sh \
+  --app-path /var/www/kktc-erp-saas \
+  --email admin@kibrisguvenlik.net \
+  --username superadmin \
+  --password 'YeniSifre123Aa'
 ```
 
 ### Testler

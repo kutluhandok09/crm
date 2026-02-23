@@ -3,7 +3,7 @@
         Hesabin icin iki adimli dogrulama aktif. Authenticator uygulamandaki kodu veya kurtarma kodunu gir.
     </div>
 
-    <form method="POST" action="{{ route('two-factor.challenge') }}" class="space-y-4">
+    <form method="POST" action="{{ route('two-factor.challenge', absolute: false) }}" class="space-y-4">
         @csrf
 
         <div>

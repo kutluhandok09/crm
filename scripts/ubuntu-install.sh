@@ -47,6 +47,16 @@ ask_secret() {
     echo "${result}"
 }
 
+normalize_domain_input() {
+    local value="$1"
+    value="$(printf '%s' "${value}" | tr '[:upper:]' '[:lower:]')"
+    value="${value#http://}"
+    value="${value#https://}"
+    value="${value%%/*}"
+    value="${value%.}"
+    printf '%s' "${value}"
+}
+
 confirm() {
     local prompt="$1"
     local answer=""
@@ -63,8 +73,15 @@ ensure_not_empty() {
     fi
 }
 
-escape_sed() {
-    printf '%s' "$1" | sed -e 's/[\/&|]/\\&/g'
+ensure_matches() {
+    local value="$1"
+    local regex="$2"
+    local field="$3"
+
+    if [[ ! "${value}" =~ ${regex} ]]; then
+        error "Invalid ${field}: ${value}"
+        exit 1
+    fi
 }
 
 sql_escape() {
@@ -75,13 +92,59 @@ upsert_env() {
     local file="$1"
     local key="$2"
     local value="$3"
-    local escaped
-    escaped="$(escape_sed "${value}")"
+    local tmp_file
+    local formatted_value
+    local updated
 
-    if rg -q "^${key}=" "${file}"; then
-        sed -i "s|^${key}=.*|${key}=${escaped}|g" "${file}"
+    formatted_value="$(format_env_value "${value}")"
+    updated=0
+    tmp_file="$(mktemp)"
+    touch "${file}"
+
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        if [[ "${line}" == "${key}="* ]]; then
+            printf '%s=%s\n' "${key}" "${formatted_value}" >> "${tmp_file}"
+            updated=1
+        else
+            printf '%s\n' "${line}" >> "${tmp_file}"
+        fi
+    done < "${file}"
+
+    if [[ "${updated}" -eq 0 ]]; then
+        printf '%s=%s\n' "${key}" "${formatted_value}" >> "${tmp_file}"
+    fi
+
+    mv "${tmp_file}" "${file}"
+}
+
+format_env_value() {
+    local value="$1"
+    local escaped
+
+    if [[ -z "${value}" ]]; then
+        printf '""'
+        return
+    fi
+
+    if [[ "${value}" =~ ^[A-Za-z0-9._/:,@+=-]+$ ]]; then
+        printf '%s' "${value}"
+        return
+    fi
+
+    escaped="${value//\\/\\\\}"
+    escaped="${escaped//\"/\\\"}"
+    escaped="${escaped//\$/\\$}"
+    escaped="${escaped//$'\n'/\\n}"
+    escaped="${escaped//$'\r'/}"
+
+    printf '"%s"' "${escaped}"
+}
+
+run_as_app_user() {
+    if [[ "$(id -un)" == "${APP_USER}" ]]; then
+        "$@"
     else
-        echo "${key}=${value}" >> "${file}"
+        sudo -u "${APP_USER}" "$@"
     fi
 }
 
@@ -91,8 +154,8 @@ if [[ "${EUID}" -eq 0 ]]; then
 fi
 
 require_command sudo
-require_command rg
 require_command bash
+require_command grep
 
 if [[ ! -f "${DEFAULT_SOURCE_APP_DIR}/artisan" ]]; then
     warn "Default source app directory not found at ${DEFAULT_SOURCE_APP_DIR}."
@@ -112,45 +175,72 @@ log "KKTC ERP SaaS Ubuntu setup is starting."
 
 DOMAIN="$(ask "Primary domain (example: domain.com)")"
 ensure_not_empty "${DOMAIN}" "Primary domain"
+DOMAIN="$(normalize_domain_input "${DOMAIN}")"
+ensure_matches "${DOMAIN}" '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$' "primary domain"
 
 CENTRAL_SUBDOMAIN="$(ask "Central panel subdomain" "admin")"
+CENTRAL_SUBDOMAIN="$(printf '%s' "${CENTRAL_SUBDOMAIN}" | tr '[:upper:]' '[:lower:]')"
+ensure_matches "${CENTRAL_SUBDOMAIN}" '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$' "central subdomain"
 CENTRAL_DOMAIN="${CENTRAL_SUBDOMAIN}.${DOMAIN}"
-CENTRAL_DOMAINS="$(ask "Central domains CSV" "127.0.0.1,localhost,${CENTRAL_DOMAIN}")"
+CENTRAL_DOMAINS="$(ask "Central domains CSV" "${CENTRAL_DOMAIN},${DOMAIN}")"
 
 APP_PATH="$(ask "Deploy path for Laravel app" "/var/www/kktc-erp-saas")"
 APP_USER="$(ask "System user owning project files" "${USER}")"
 SOURCE_APP_DIR="$(ask "Source Laravel app directory" "${DEFAULT_SOURCE_APP_DIR}")"
 ensure_not_empty "${SOURCE_APP_DIR}" "Source Laravel app directory"
 
+if ! id "${APP_USER}" >/dev/null 2>&1; then
+    error "System user does not exist: ${APP_USER}"
+    exit 1
+fi
+
 if [[ ! -f "${SOURCE_APP_DIR}/artisan" ]]; then
     error "Invalid source app directory: ${SOURCE_APP_DIR} (artisan file missing)."
     exit 1
 fi
+ensure_matches "${APP_PATH}" '^/' "deploy path"
 
 TIMEZONE="$(ask "Server timezone" "Europe/Istanbul")"
 PHP_VERSION="$(ask "PHP version (8.2/8.3)" "8.3")"
+ensure_matches "${PHP_VERSION}" '^[0-9]+\.[0-9]+$' "PHP version"
 NODE_MAJOR="$(ask "Node.js major version" "20")"
+ensure_matches "${NODE_MAJOR}" '^[0-9]+$' "Node.js major version"
 
 DB_CENTRAL_DATABASE="$(ask "Central database name" "erp_central")"
+ensure_matches "${DB_CENTRAL_DATABASE}" '^[A-Za-z0-9_]+$' "central database name"
 DB_APP_USER="$(ask "Database app user" "erp_app")"
+ensure_matches "${DB_APP_USER}" '^[A-Za-z0-9_]+$' "database app user"
 DB_APP_PASSWORD="$(ask_secret "Database app password")"
 ensure_not_empty "${DB_APP_PASSWORD}" "Database app password"
 DB_HOST="$(ask "Database host" "127.0.0.1")"
 DB_PORT="$(ask "Database port" "3306")"
+ensure_matches "${DB_PORT}" '^[0-9]+$' "database port"
 TENANT_DB_PREFIX="$(ask "Tenant database prefix" "tenant_")"
+ensure_matches "${TENANT_DB_PREFIX}" '^[A-Za-z0-9_]+$' "tenant database prefix"
 
 RUN_SEED="no"
+ADMIN_EMAIL=""
+ADMIN_PASSWORD=""
 if confirm "Run central db seed (creates super-admin user)?"; then
     RUN_SEED="yes"
+    ADMIN_EMAIL="$(ask "Initial super-admin email" "admin@${DOMAIN}")"
+    ensure_matches "${ADMIN_EMAIL}" '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' "initial super-admin email"
+    ADMIN_PASSWORD="$(ask_secret "Initial super-admin password (used after seeding)")"
+    ensure_not_empty "${ADMIN_PASSWORD}" "Initial super-admin password"
 fi
 
-INSTALL_SSL="no"
+SSL_MODE="$(ask "SSL mode (wildcard-cloudflare / central-only)" "wildcard-cloudflare")"
+SSL_MODE="${SSL_MODE,,}"
+SSL_EMAIL="$(ask "SSL contact email" "admin@${DOMAIN}")"
+ensure_not_empty "${SSL_EMAIL}" "SSL contact email"
+
 CLOUDFLARE_API_TOKEN=""
-SSL_EMAIL=""
-if confirm "Configure wildcard SSL with Certbot?"; then
-    INSTALL_SSL="yes"
-    SSL_EMAIL="$(ask "SSL contact email" "admin@${DOMAIN}")"
-    CLOUDFLARE_API_TOKEN="$(ask_secret "Cloudflare API token for DNS challenge (leave empty to skip wildcard cert creation)")"
+if [[ "${SSL_MODE}" == "wildcard-cloudflare" ]]; then
+    CLOUDFLARE_API_TOKEN="$(ask_secret "Cloudflare API token (required for wildcard SSL)")"
+    ensure_not_empty "${CLOUDFLARE_API_TOKEN}" "Cloudflare API token"
+elif [[ "${SSL_MODE}" != "central-only" ]]; then
+    error "Invalid SSL mode: ${SSL_MODE}. Allowed values: wildcard-cloudflare or central-only."
+    exit 1
 fi
 
 log "Configuration summary"
@@ -166,7 +256,11 @@ echo "  DB host/port:            ${DB_HOST}:${DB_PORT}"
 echo "  Central DB:              ${DB_CENTRAL_DATABASE}"
 echo "  DB app user:             ${DB_APP_USER}"
 echo "  Tenant DB prefix:        ${TENANT_DB_PREFIX}"
-echo "  SSL requested:           ${INSTALL_SSL}"
+echo "  Run seed:                ${RUN_SEED}"
+if [[ "${RUN_SEED}" == "yes" ]]; then
+echo "  Seed admin email:        ${ADMIN_EMAIL}"
+fi
+echo "  SSL mode:                ${SSL_MODE}"
 
 confirm "Proceed with installation?" || exit 1
 
@@ -174,6 +268,7 @@ log "Installing system dependencies..."
 sudo apt update
 sudo apt install -y software-properties-common ca-certificates curl gnupg lsb-release unzip git rsync ufw
 sudo apt install -y nginx mariadb-server supervisor
+sudo apt install -y certbot python3-certbot-nginx
 
 sudo add-apt-repository ppa:ondrej/php -y
 sudo apt update
@@ -211,22 +306,21 @@ sudo ufw --force enable
 
 log "Deploying application code..."
 sudo mkdir -p "${APP_PATH}"
-sudo rsync -a --delete "${SOURCE_APP_DIR}/" "${APP_PATH}/"
+# Avoid destructive sync to keep existing .env/storage data on reruns.
+sudo rsync -a "${SOURCE_APP_DIR}/" "${APP_PATH}/"
 sudo chown -R "${APP_USER}:www-data" "${APP_PATH}"
 
 cd "${APP_PATH}"
 
-log "Installing PHP/Node dependencies..."
-composer install --no-interaction --prefer-dist --optimize-autoloader
-npm install --no-audit --no-fund
-npm run build
-
-if [[ ! -f "${APP_PATH}/.env" ]]; then
-    cp "${APP_PATH}/.env.example" "${APP_PATH}/.env"
+if [[ -f "${APP_PATH}/.env" ]]; then
+    cp "${APP_PATH}/.env" "${APP_PATH}/.env.backup.$(date +%Y%m%d%H%M%S)"
 fi
+cp "${APP_PATH}/.env.example" "${APP_PATH}/.env"
+sudo chown "${APP_USER}:www-data" "${APP_PATH}/.env"
+sudo chmod 640 "${APP_PATH}/.env"
 
 ENV_FILE="${APP_PATH}/.env"
-upsert_env "${ENV_FILE}" "APP_NAME" "\"KKTC ERP SaaS\""
+upsert_env "${ENV_FILE}" "APP_NAME" "KKTC ERP SaaS"
 upsert_env "${ENV_FILE}" "APP_ENV" "production"
 upsert_env "${ENV_FILE}" "APP_DEBUG" "false"
 upsert_env "${ENV_FILE}" "APP_URL" "https://${CENTRAL_DOMAIN}"
@@ -263,34 +357,118 @@ upsert_env "${ENV_FILE}" "SESSION_DRIVER" "database"
 upsert_env "${ENV_FILE}" "CACHE_STORE" "database"
 upsert_env "${ENV_FILE}" "QUEUE_CONNECTION" "database"
 
+APP_KEY_CURRENT="$(grep '^APP_KEY=' "${ENV_FILE}" | head -n1 | cut -d= -f2- || true)"
+APP_KEY_CURRENT="$(printf '%s' "${APP_KEY_CURRENT}" | tr -d '\r')"
+if [[ -z "${APP_KEY_CURRENT}" || "${APP_KEY_CURRENT}" == "\"\"" || ! "${APP_KEY_CURRENT}" =~ ^base64:[A-Za-z0-9+/=]{43,}$ ]]; then
+    APP_KEY_VALUE="$(php -r "echo 'base64:'.base64_encode(random_bytes(32));")"
+    upsert_env "${ENV_FILE}" "APP_KEY" "${APP_KEY_VALUE}"
+fi
+
+log "Installing PHP/Node dependencies..."
+run_as_app_user composer install --no-interaction --prefer-dist --optimize-autoloader --no-scripts
+run_as_app_user npm install --no-audit --no-fund
+run_as_app_user npm run build
+
 log "Preparing MariaDB central database and user grants..."
-DB_APP_USER_SQL="$(sql_escape "${DB_APP_USER}")"
 DB_APP_PASSWORD_SQL="$(sql_escape "${DB_APP_PASSWORD}")"
-DB_CENTRAL_DATABASE_SQL="$(sql_escape "${DB_CENTRAL_DATABASE}")"
+DB_CENTRAL_DATABASE_SQL="${DB_CENTRAL_DATABASE}"
 
 sudo mariadb <<SQL
 CREATE DATABASE IF NOT EXISTS \`${DB_CENTRAL_DATABASE_SQL}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS '${DB_APP_USER_SQL}'@'localhost' IDENTIFIED BY '${DB_APP_PASSWORD_SQL}';
-CREATE USER IF NOT EXISTS '${DB_APP_USER_SQL}'@'127.0.0.1' IDENTIFIED BY '${DB_APP_PASSWORD_SQL}';
-GRANT ALL PRIVILEGES ON \`${DB_CENTRAL_DATABASE_SQL}\`.* TO '${DB_APP_USER_SQL}'@'localhost';
-GRANT ALL PRIVILEGES ON \`${DB_CENTRAL_DATABASE_SQL}\`.* TO '${DB_APP_USER_SQL}'@'127.0.0.1';
-GRANT CREATE, ALTER, DROP, INDEX, REFERENCES ON *.* TO '${DB_APP_USER_SQL}'@'localhost';
-GRANT CREATE, ALTER, DROP, INDEX, REFERENCES ON *.* TO '${DB_APP_USER_SQL}'@'127.0.0.1';
+CREATE USER IF NOT EXISTS '${DB_APP_USER}'@'localhost' IDENTIFIED BY '${DB_APP_PASSWORD_SQL}';
+CREATE USER IF NOT EXISTS '${DB_APP_USER}'@'127.0.0.1' IDENTIFIED BY '${DB_APP_PASSWORD_SQL}';
+GRANT ALL PRIVILEGES ON \`${DB_CENTRAL_DATABASE_SQL}\`.* TO '${DB_APP_USER}'@'localhost';
+GRANT ALL PRIVILEGES ON \`${DB_CENTRAL_DATABASE_SQL}\`.* TO '${DB_APP_USER}'@'127.0.0.1';
+GRANT CREATE, ALTER, DROP, INDEX, REFERENCES ON *.* TO '${DB_APP_USER}'@'localhost';
+GRANT CREATE, ALTER, DROP, INDEX, REFERENCES ON *.* TO '${DB_APP_USER}'@'127.0.0.1';
 FLUSH PRIVILEGES;
 SQL
 
+run_artisan_with_db_env() {
+    run_as_app_user env \
+        DB_CONNECTION=central \
+        DB_CENTRAL_CONNECTION=central \
+        DB_CENTRAL_DRIVER=mariadb \
+        DB_CENTRAL_HOST="${DB_HOST}" \
+        DB_CENTRAL_PORT="${DB_PORT}" \
+        DB_CENTRAL_DATABASE="${DB_CENTRAL_DATABASE}" \
+        DB_CENTRAL_USERNAME="${DB_APP_USER}" \
+        DB_CENTRAL_PASSWORD="${DB_APP_PASSWORD}" \
+        DB_HOST="${DB_HOST}" \
+        DB_PORT="${DB_PORT}" \
+        DB_DATABASE="${DB_CENTRAL_DATABASE}" \
+        DB_USERNAME="${DB_APP_USER}" \
+        DB_PASSWORD="${DB_APP_PASSWORD}" \
+        "$@"
+}
+
 log "Running Laravel setup commands..."
-php artisan key:generate --force
-php artisan config:clear
-php artisan cache:clear || true
-php artisan migrate --database=central --force
+run_artisan_with_db_env php artisan package:discover --ansi
+run_as_app_user php artisan key:generate --force
+run_as_app_user php artisan config:clear
+run_artisan_with_db_env php artisan migrate --database=central --force
 
 if [[ "${RUN_SEED}" == "yes" ]]; then
-    php artisan db:seed --database=central --force
+    run_artisan_with_db_env php artisan db:seed --database=central --force
+
+    log "Updating seeded super-admin credentials..."
+    APP_ADMIN_EMAIL="${ADMIN_EMAIL}" APP_ADMIN_PASSWORD="${ADMIN_PASSWORD}" run_artisan_with_db_env php <<'PHP'
+<?php
+require __DIR__.'/vendor/autoload.php';
+
+$app = require __DIR__.'/bootstrap/app.php';
+$kernel = $app->make(Illuminate\Contracts\Console\Kernel::class);
+$kernel->bootstrap();
+
+$adminEmail = getenv('APP_ADMIN_EMAIL') ?: 'admin@domain.com';
+$adminPassword = getenv('APP_ADMIN_PASSWORD') ?: null;
+
+if (!$adminPassword) {
+    fwrite(STDERR, "Seeded admin password is empty.\n");
+    exit(1);
+}
+
+$user = \App\Models\User::query()
+    ->where('username', 'superadmin')
+    ->orWhere('email', 'admin@domain.com')
+    ->orderBy('id')
+    ->first();
+if (!$user) {
+    $user = \App\Models\User::role('super-admin')->orderBy('id')->first();
+}
+if (!$user) {
+    $user = \App\Models\User::query()->orderBy('id')->first();
+}
+
+if (!$user) {
+    fwrite(STDERR, "No user found after seeding.\n");
+    exit(1);
+}
+
+$newEmail = strtolower($adminEmail);
+$emailIsUsedByAnother = \App\Models\User::query()
+    ->where('email', $newEmail)
+    ->where('id', '!=', $user->id)
+    ->exists();
+
+if (! $emailIsUsedByAnother) {
+    $user->email = $newEmail;
+} else {
+    fwrite(STDERR, "Warning: Requested admin email is already used by another account; keeping current email.\n");
+}
+
+$user->password = \Illuminate\Support\Facades\Hash::make($adminPassword);
+$user->save();
+$user->assignRole('super-admin');
+PHP
 fi
 
-php artisan storage:link || true
-php artisan optimize
+run_as_app_user php artisan storage:link || true
+# Avoid route:cache because central domains may define repeated named routes.
+run_as_app_user php artisan route:clear || true
+run_as_app_user php artisan config:cache
+run_as_app_user php artisan event:cache || true
+run_as_app_user php artisan view:cache || true
 
 sudo chown -R www-data:www-data "${APP_PATH}/storage" "${APP_PATH}/bootstrap/cache"
 sudo chmod -R 775 "${APP_PATH}/storage" "${APP_PATH}/bootstrap/cache"
@@ -315,35 +493,65 @@ location ~ /\.(?!well-known).* {
 EOF
 
 SSL_ENABLED="no"
+CERT_PATH_DOMAIN="${CENTRAL_DOMAIN}"
+TENANT_SSL_ENABLED="no"
 
-if [[ "${INSTALL_SSL}" == "yes" ]]; then
-    if [[ -n "${CLOUDFLARE_API_TOKEN}" ]]; then
-        log "Installing Certbot DNS plugin for Cloudflare..."
-        sudo apt install -y certbot python3-certbot-dns-cloudflare
-        sudo tee /etc/letsencrypt/cloudflare.ini >/dev/null <<EOF
+if [[ "${SSL_MODE}" == "wildcard-cloudflare" ]]; then
+    log "Installing Certbot DNS plugin for Cloudflare..."
+    sudo apt install -y python3-certbot-dns-cloudflare
+    sudo tee /etc/letsencrypt/cloudflare.ini >/dev/null <<EOF
 dns_cloudflare_api_token = ${CLOUDFLARE_API_TOKEN}
 EOF
-        sudo chmod 600 /etc/letsencrypt/cloudflare.ini
+    sudo chmod 600 /etc/letsencrypt/cloudflare.ini
 
-        log "Requesting wildcard certificate (*.${DOMAIN})..."
-        sudo certbot certonly \
-            --dns-cloudflare \
-            --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini \
-            -d "${DOMAIN}" \
-            -d "*.${DOMAIN}" \
-            --agree-tos \
-            -m "${SSL_EMAIL}" \
-            --no-eff-email || warn "Certificate request failed. Continuing without SSL."
-    else
-        warn "Cloudflare token not provided; wildcard certificate step skipped."
-    fi
+    log "Issuing wildcard certificate for ${DOMAIN} and *.${DOMAIN}..."
+    sudo certbot certonly \
+        --dns-cloudflare \
+        --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini \
+        -d "${DOMAIN}" \
+        -d "*.${DOMAIN}" \
+        --agree-tos \
+        -m "${SSL_EMAIL}" \
+        --non-interactive \
+        --no-eff-email
 
-    if [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
-        SSL_ENABLED="yes"
-    fi
+    CERT_PATH_DOMAIN="${DOMAIN}"
+    TENANT_SSL_ENABLED="yes"
+else
+    warn "Central-only SSL selected. Tenant wildcard will stay HTTP until wildcard cert is configured."
+    log "Issuing certificate for ${CENTRAL_DOMAIN} via nginx challenge..."
+    # Temporary HTTP config for challenge.
+    sudo tee /etc/nginx/sites-available/kktc-erp.conf >/dev/null <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${CENTRAL_DOMAIN} *.${DOMAIN};
+    include /etc/nginx/snippets/kktc-erp-laravel.conf;
+}
+EOF
+    sudo ln -sf /etc/nginx/sites-available/kktc-erp.conf /etc/nginx/sites-enabled/kktc-erp.conf
+    sudo rm -f /etc/nginx/sites-enabled/default
+    sudo nginx -t
+    sudo systemctl reload nginx
+
+    sudo certbot --nginx \
+        -d "${CENTRAL_DOMAIN}" \
+        --agree-tos \
+        -m "${SSL_EMAIL}" \
+        --non-interactive \
+        --redirect \
+        --no-eff-email
+fi
+
+if [[ -f "/etc/letsencrypt/live/${CERT_PATH_DOMAIN}/fullchain.pem" ]]; then
+    SSL_ENABLED="yes"
+else
+    error "SSL certificate was not created successfully."
+    exit 1
 fi
 
 if [[ "${SSL_ENABLED}" == "yes" ]]; then
+    if [[ "${TENANT_SSL_ENABLED}" == "yes" ]]; then
     sudo tee /etc/nginx/sites-available/kktc-erp.conf >/dev/null <<EOF
 server {
     listen 80;
@@ -374,6 +582,35 @@ server {
     include /etc/nginx/snippets/kktc-erp-laravel.conf;
 }
 EOF
+    else
+        sudo tee /etc/nginx/sites-available/kktc-erp.conf >/dev/null <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${CENTRAL_DOMAIN};
+    return 301 https://\$host\$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${CENTRAL_DOMAIN};
+
+    ssl_certificate /etc/letsencrypt/live/${CERT_PATH_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${CERT_PATH_DOMAIN}/privkey.pem;
+
+    include /etc/nginx/snippets/kktc-erp-laravel.conf;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name *.${DOMAIN};
+
+    include /etc/nginx/snippets/kktc-erp-laravel.conf;
+}
+EOF
+    fi
 
     upsert_env "${ENV_FILE}" "APP_URL" "https://${CENTRAL_DOMAIN}"
 
@@ -384,17 +621,8 @@ systemctl reload nginx
 EOF
     sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
 else
-    sudo tee /etc/nginx/sites-available/kktc-erp.conf >/dev/null <<EOF
-server {
-    listen 80;
-    listen [::]:80;
-    server_name ${CENTRAL_DOMAIN} *.${DOMAIN};
-
-    include /etc/nginx/snippets/kktc-erp-laravel.conf;
-}
-EOF
-
-    upsert_env "${ENV_FILE}" "APP_URL" "http://${CENTRAL_DOMAIN}"
+    error "SSL was expected but not enabled. Aborting."
+    exit 1
 fi
 
 sudo ln -sf /etc/nginx/sites-available/kktc-erp.conf /etc/nginx/sites-enabled/kktc-erp.conf
@@ -403,7 +631,7 @@ sudo nginx -t
 sudo systemctl reload nginx
 
 log "Configuring scheduler cron..."
-(crontab -l 2>/dev/null; echo "* * * * * cd ${APP_PATH} && php artisan schedule:run >> /dev/null 2>&1") | crontab -
+(crontab -l 2>/dev/null | grep -v "php artisan schedule:run"; echo "* * * * * cd ${APP_PATH} && php artisan schedule:run >> /dev/null 2>&1") | crontab -
 
 log "Configuring Supervisor queue worker..."
 sudo mkdir -p /var/log/supervisor
@@ -434,10 +662,14 @@ echo "Tenant URL  : $(if [[ "${SSL_ENABLED}" == "yes" ]]; then echo "https"; els
 echo "App path    : ${APP_PATH}"
 echo
 echo "If seed was enabled, default admin user:"
-echo "  Email: admin@domain.com"
-echo "  Password: Admin12345!"
+if [[ "${RUN_SEED}" == "yes" ]]; then
+echo "  Email: ${ADMIN_EMAIL}"
+echo "  Password: (custom value entered during setup)"
+else
+echo "  Seed not run."
+fi
 echo
 echo "Next manual checks:"
 echo "  - php artisan tenants:list"
 echo "  - php artisan tenants:migrate --force"
-echo "  - sudo certbot renew --dry-run   (if SSL configured)"
+echo "  - sudo certbot renew --dry-run"
